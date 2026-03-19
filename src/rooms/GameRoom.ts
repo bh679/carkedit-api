@@ -4,6 +4,7 @@ import { Player } from "../schema/Player";
 import { shuffle, createDeck } from "../utils/deck";
 import { DIE_CARDS, LIVING_CARDS, BYE_CARDS } from "../data/cards";
 import { handleRevealDie, handleEndDieTurn } from "../phases/DiePhase";
+import { handleSubmitCard, handleRevealSubmission, handleEndConvinceTurn, handleSelectWinner } from "../phases/LivingPhase";
 
 const MIN_PLAYERS = 2;
 
@@ -47,19 +48,19 @@ export class GameRoom extends Room<{ state: GameState }> {
     });
 
     this.onMessage("submit_card", (client, data: { cardIndex: number }) => {
-      console.log(`[GameRoom] submit_card from ${client.sessionId}, cardIndex: ${data.cardIndex}`);
+      handleSubmitCard(this.state, client, data.cardIndex);
     });
 
-    this.onMessage("reveal_submission", (client, _data: unknown) => {
-      console.log(`[GameRoom] reveal_submission from ${client.sessionId}`);
+    this.onMessage("reveal_submission", (client) => {
+      handleRevealSubmission(this.state, client);
     });
 
-    this.onMessage("end_convince_turn", (client, _data: unknown) => {
-      console.log(`[GameRoom] end_convince_turn from ${client.sessionId}`);
+    this.onMessage("end_convince_turn", (client) => {
+      handleEndConvinceTurn(this.state, client);
     });
 
     this.onMessage("select_winner", (client, data: { cardIndex: number }) => {
-      console.log(`[GameRoom] select_winner from ${client.sessionId}, cardIndex: ${data.cardIndex}`);
+      handleSelectWinner(this.state, client, data.cardIndex);
     });
 
     console.log(`[GameRoom] Room created`);
