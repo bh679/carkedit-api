@@ -2,6 +2,7 @@ import { Room, Client } from "colyseus";
 import { GameState } from "../schema/GameState";
 import { Player } from "../schema/Player";
 import { Card } from "../schema/Card";
+import { ROOM_CODE_WORDS } from "./roomWords";
 
 const MIN_PLAYERS = 2;
 const CARDS_PER_PLAYER = 5;
@@ -25,12 +26,8 @@ function createDeck(): Card[] {
   return cards;
 }
 
-const ROOM_CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-
 function generateRoomCode(): string {
-  return Array.from({ length: 4 }, () =>
-    ROOM_CODE_CHARS[Math.floor(Math.random() * ROOM_CODE_CHARS.length)]
-  ).join("");
+  return ROOM_CODE_WORDS[Math.floor(Math.random() * ROOM_CODE_WORDS.length)];
 }
 
 function shuffle<T>(array: T[]): T[] {
