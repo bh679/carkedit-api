@@ -3,6 +3,7 @@ import { GameState } from "../schema/GameState";
 import { Player } from "../schema/Player";
 import { shuffle, createDeck } from "../utils/deck";
 import { DIE_CARDS, LIVING_CARDS, BYE_CARDS } from "../data/cards";
+import { handleRevealDie, handleEndDieTurn } from "../phases/DiePhase";
 
 const MIN_PLAYERS = 2;
 
@@ -37,12 +38,12 @@ export class GameRoom extends Room<{ state: GameState }> {
       }
     });
 
-    this.onMessage("reveal_die", (client, _data: unknown) => {
-      console.log(`[GameRoom] reveal_die from ${client.sessionId}`);
+    this.onMessage("reveal_die", (client) => {
+      handleRevealDie(this.state, client);
     });
 
-    this.onMessage("end_die_turn", (client, _data: unknown) => {
-      console.log(`[GameRoom] end_die_turn from ${client.sessionId}`);
+    this.onMessage("end_die_turn", (client) => {
+      handleEndDieTurn(this.state, client);
     });
 
     this.onMessage("submit_card", (client, data: { cardIndex: number }) => {
