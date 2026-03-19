@@ -14,7 +14,7 @@ const server = defineServer({
 
     app.get("/api/rooms/lookup", async (_req: any, res: any) => {
       const code = ((_req.query.code as string) || "").toUpperCase().trim();
-      if (!code || code.length !== 4) {
+      if (!code || code.length < 3 || code.length > 5) {
         return res.status(400).json({ error: "Invalid room code" });
       }
 
