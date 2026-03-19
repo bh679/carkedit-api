@@ -24,6 +24,8 @@ export class GameRoom extends Room<{ state: GameState }> {
 
     if (options.private) {
       const roomCode = generateRoomCode();
+      this.state.isPrivate = true;
+      this.state.roomCode = roomCode;
       await this.setPrivate(true);
       await this.setMetadata({ roomCode });
     }
