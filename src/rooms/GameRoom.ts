@@ -1,29 +1,10 @@
 import { Room, Client } from "colyseus";
 import { GameState } from "../schema/GameState";
 import { Player } from "../schema/Player";
-import { Card } from "../schema/Card";
+import { shuffle, createDeck } from "../utils/deck";
+import { DIE_CARDS, LIVING_CARDS, BYE_CARDS } from "../data/cards";
 
 const MIN_PLAYERS = 2;
-const CARDS_PER_PLAYER = 5;
-
-function createDeck(): Card[] {
-  const types = ["attack", "defend", "heal", "boost", "wild"];
-  const values = ["1", "2", "3", "4", "5"];
-  const cards: Card[] = [];
-
-  for (const cardType of types) {
-    for (const value of values) {
-      const card = new Card();
-      card.id = `${cardType}-${value}-${cards.length}`;
-      card.value = value;
-      card.cardType = cardType;
-      card.faceUp = false;
-      cards.push(card);
-    }
-  }
-
-  return cards;
-}
 
 const ROOM_CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
@@ -33,15 +14,6 @@ function generateRoomCode(): string {
   ).join("");
 }
 
-function shuffle<T>(array: T[]): T[] {
-  const shuffled = [...array];
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-  }
-  return shuffled;
-}
-
 export class GameRoom extends Room<{ state: GameState }> {
   maxClients = 10;
 
@@ -49,22 +21,13 @@ export class GameRoom extends Room<{ state: GameState }> {
     this.setState(new GameState());
 
     if (options.private) {
-      this.state.isPrivate = true;
-      this.state.roomCode = generateRoomCode();
+      const roomCode = generateRoomCode();
       await this.setPrivate(true);
-      await this.setMetadata({ roomCode: this.state.roomCode });
+      await this.setMetadata({ roomCode });
     }
 
     this.onMessage("ready", (client) => {
       this.handleReady(client);
-    });
-
-    this.onMessage("flip", (client, data: { cardIndex: number }) => {
-      this.handleFlip(client, data.cardIndex);
-    });
-
-    this.onMessage("play", (client, data: { cardIndex: number }) => {
-      this.handlePlay(client, data.cardIndex);
     });
 
     this.onMessage("set_name", (client, data: { name: string }) => {
@@ -72,6 +35,30 @@ export class GameRoom extends Room<{ state: GameState }> {
       if (player) {
         player.name = data.name;
       }
+    });
+
+    this.onMessage("reveal_die", (client, _data: unknown) => {
+      console.log(`[GameRoom] reveal_die from ${client.sessionId}`);
+    });
+
+    this.onMessage("end_die_turn", (client, _data: unknown) => {
+      console.log(`[GameRoom] end_die_turn from ${client.sessionId}`);
+    });
+
+    this.onMessage("submit_card", (client, data: { cardIndex: number }) => {
+      console.log(`[GameRoom] submit_card from ${client.sessionId}, cardIndex: ${data.cardIndex}`);
+    });
+
+    this.onMessage("reveal_submission", (client, _data: unknown) => {
+      console.log(`[GameRoom] reveal_submission from ${client.sessionId}`);
+    });
+
+    this.onMessage("end_convince_turn", (client, _data: unknown) => {
+      console.log(`[GameRoom] end_convince_turn from ${client.sessionId}`);
+    });
+
+    this.onMessage("select_winner", (client, data: { cardIndex: number }) => {
+      console.log(`[GameRoom] select_winner from ${client.sessionId}, cardIndex: ${data.cardIndex}`);
     });
 
     console.log(`[GameRoom] Room created`);
@@ -92,7 +79,7 @@ export class GameRoom extends Room<{ state: GameState }> {
     console.log(`[GameRoom] ${player.name} joined (${client.sessionId})`);
   }
 
-  onLeave(client: Client, code?: number) {
+  onLeave(client: Client, _code?: number) {
     const player = this.state.players.get(client.sessionId);
     if (player) {
       console.log(`[GameRoom] ${player.name} left`);
@@ -131,84 +118,35 @@ export class GameRoom extends Room<{ state: GameState }> {
   }
 
   private startGame() {
-    this.state.phase = "dealing";
-    console.log(`[GameRoom] Game starting — dealing cards`);
+    console.log(`[GameRoom] Game starting — creating decks`);
 
-    const deck = shuffle(createDeck());
+    const shuffledDieDeck = shuffle(createDeck(DIE_CARDS, "die"));
+    const shuffledLivingDeck = shuffle(createDeck(LIVING_CARDS, "living"));
+    const shuffledByeDeck = shuffle(createDeck(BYE_CARDS, "bye"));
 
-    const playerIds = Array.from(this.state.players.keys());
+    shuffledDieDeck.forEach((card) => this.state.dieDeck.push(card));
+    shuffledLivingDeck.forEach((card) => this.state.livingDeck.push(card));
+    shuffledByeDeck.forEach((card) => this.state.byeDeck.push(card));
 
-    let cardIndex = 0;
-    for (const playerId of playerIds) {
+    const playerKeys = Array.from(this.state.players.keys());
+    const shuffledOrder = shuffle(playerKeys);
+    shuffledOrder.forEach((id) => this.state.turnOrder.push(id));
+
+    // Deal 1 Die card per player from the dieDeck
+    for (const playerId of shuffledOrder) {
       const player = this.state.players.get(playerId);
       if (!player) continue;
 
-      for (let i = 0; i < CARDS_PER_PLAYER; i++) {
-        if (cardIndex < deck.length) {
-          player.hand.push(deck[cardIndex]);
-          cardIndex++;
-        }
+      if (this.state.dieDeck.length > 0) {
+        const card = this.state.dieDeck.splice(0, 1)[0];
+        player.hand.push(card);
       }
     }
 
-    for (let i = cardIndex; i < deck.length; i++) {
-      this.state.deck.push(deck[i]);
-    }
-
-    this.state.currentTurn = playerIds[0];
+    this.state.currentTurn = shuffledOrder[0];
     this.state.round = 1;
+    this.state.phase = "die_phase";
 
-    this.clock.setTimeout(() => {
-      this.state.phase = "playing";
-      console.log(`[GameRoom] Phase: playing — ${this.state.currentTurn}'s turn`);
-    }, 1000);
-  }
-
-  private handleFlip(client: Client, cardIndex: number) {
-    if (this.state.phase !== "playing") return;
-    if (this.state.currentTurn !== client.sessionId) return;
-
-    const player = this.state.players.get(client.sessionId);
-    if (!player) return;
-
-    const card = player.hand[cardIndex];
-    if (!card) return;
-
-    card.faceUp = !card.faceUp;
-    console.log(`[GameRoom] ${player.name} flipped card ${card.id} (faceUp: ${card.faceUp})`);
-  }
-
-  private handlePlay(client: Client, cardIndex: number) {
-    if (this.state.phase !== "playing") return;
-    if (this.state.currentTurn !== client.sessionId) return;
-
-    const player = this.state.players.get(client.sessionId);
-    if (!player) return;
-
-    const card = player.hand[cardIndex];
-    if (!card) return;
-
-    card.faceUp = true;
-    const played = player.hand.splice(cardIndex, 1);
-    if (played.length > 0) {
-      this.state.discard.push(played[0]);
-    }
-
-    console.log(`[GameRoom] ${player.name} played ${card.cardType}-${card.value}`);
-
-    this.advanceTurn();
-  }
-
-  private advanceTurn() {
-    const playerIds = Array.from(this.state.players.keys());
-    const currentIndex = playerIds.indexOf(this.state.currentTurn);
-    const nextIndex = (currentIndex + 1) % playerIds.length;
-
-    if (nextIndex === 0) {
-      this.state.round++;
-    }
-
-    this.state.currentTurn = playerIds[nextIndex];
-    console.log(`[GameRoom] Turn: ${this.state.currentTurn}`);
+    console.log(`[GameRoom] Phase: die_phase — ${this.state.currentTurn}'s turn`);
   }
 }

@@ -10,4 +10,6 @@ export class Player extends Schema {
   @type("number") birthMonth: number = 0;
   @type("number") birthDay: number = 0;
   @type([Card]) hand = new ArraySchema<Card>();
+  @type("boolean") hasSubmitted: boolean = false;
+  @type("boolean") hasBeenLivingDead: boolean = false;
 }
