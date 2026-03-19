@@ -5,15 +5,12 @@ import { shuffle, createDeck } from "../utils/deck";
 import { DIE_CARDS, LIVING_CARDS, BYE_CARDS } from "../data/cards";
 import { handleRevealDie, handleEndDieTurn } from "../phases/DiePhase";
 import { handleSubmitCard, handleRevealSubmission, handleEndConvinceTurn, handleSelectWinner } from "../phases/LivingPhase";
+import { ROOM_CODE_WORDS } from "./roomWords";
 
 const MIN_PLAYERS = 2;
 
-const ROOM_CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-
 function generateRoomCode(): string {
-  return Array.from({ length: 4 }, () =>
-    ROOM_CODE_CHARS[Math.floor(Math.random() * ROOM_CODE_CHARS.length)]
-  ).join("");
+  return ROOM_CODE_WORDS[Math.floor(Math.random() * ROOM_CODE_WORDS.length)];
 }
 
 export class GameRoom extends Room<{ state: GameState }> {
