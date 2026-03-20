@@ -1,13 +1,18 @@
+import path from "path";
+import express from "express";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom";
 
-const port = parseInt(process.env.PORT || "4501", 10);
+const port = parseInt(process.env.PORT || "4500", 10);
+const clientDir = path.join(__dirname, "../../carkedit-client");
 
 const server = defineServer({
   rooms: {
     game: defineRoom(GameRoom),
   },
   express: (app) => {
+    app.use(express.static(clientDir));
+
     app.get("/api/carkedit/health", (_req: any, res: any) => {
       res.json({ status: "ok", timestamp: new Date().toISOString() });
     });
@@ -36,3 +41,4 @@ const server = defineServer({
 server.listen(port);
 console.log(`[CarkedIt API] Listening on port ${port}`);
 console.log(`[CarkedIt API] Health check: http://localhost:${port}/api/carkedit/health`);
+console.log(`[CarkedIt API] Serving client from: ${clientDir}`);
