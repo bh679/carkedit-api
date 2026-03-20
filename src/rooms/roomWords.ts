@@ -19,6 +19,8 @@ const WORDS_3: readonly string[] = [
   // Life & living
   "BUD", "JOY", "NEW", "KID", "FUN", "HUG", "RUN", "EAT", "NAP", "PET",
   "AWE", "BOY", "GAL", "HOP", "PAL", "TEA", "WIN", "ZEN", "YEN", "GIG",
+  // Age & time
+  "AGE", "BUB", "DAY", "NOW",
 ];
 
 // 4-letter words
@@ -72,6 +74,8 @@ const WORDS_4: readonly string[] = [
   "OPEN", "PERK", "PLUM", "PURE", "REAL", "RISE", "ROAM", "ROAR", "SAFE", "SAIL",
   "SAVE", "SKIP", "SLIM", "SNAP", "SOFT", "SPIN", "SWIM", "TALL", "TAME", "TEND",
   "TIME", "TREK", "TRUE", "VIBE", "WALK", "WARM", "WILD", "YARN", "YEAR", "ZEST",
+  // Age & time
+  "TEEN", "HOUR", "WEEK", "WHEN", "THEN", "ONLY", "WANT", "NEED", "ATOM", "DIRT",
 ];
 
 // 5-letter words
@@ -98,6 +102,8 @@ const WORDS_5: readonly string[] = [
   "ALIVE", "BLOOM", "BIRTH", "BRAVE", "CHILD", "DREAM", "EARTH", "FAITH", "FLAME", "FLORA",
   "FRESH", "GRACE", "HEART", "HAPPY", "HUMAN", "LIGHT", "LUCKY", "MAGIC", "MERCY", "MUSIC",
   "NOBLE", "OASIS", "SMILE", "SPARK", "SWEET", "SWIFT", "TRUST", "UNITY", "VITAL", "YOUNG",
+  // Age & time
+  "ADULT", "GRAMP", "YEARS", "MONTH", "LOVES", "LATER", "ATOMS",
 ];
 
 export const ROOM_CODE_WORDS: readonly string[] = [
