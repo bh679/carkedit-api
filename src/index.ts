@@ -13,13 +13,13 @@ const server = defineServer({
   express: (app) => {
     app.use(express.static(clientDir));
 
-    app.get("/health", (_req: any, res: any) => {
+    app.get("/api/carkedit/health", (_req: any, res: any) => {
       res.json({ status: "ok", timestamp: new Date().toISOString() });
     });
 
-    app.get("/api/rooms/lookup", async (_req: any, res: any) => {
+    app.get("/api/carkedit/rooms/lookup", async (_req: any, res: any) => {
       const code = ((_req.query.code as string) || "").toUpperCase().trim();
-      if (!code || code.length !== 4) {
+      if (!code || code.length < 3 || code.length > 5) {
         return res.status(400).json({ error: "Invalid room code" });
       }
 
@@ -40,5 +40,5 @@ const server = defineServer({
 
 server.listen(port);
 console.log(`[CarkedIt API] Listening on port ${port}`);
-console.log(`[CarkedIt API] Health check: http://localhost:${port}/health`);
+console.log(`[CarkedIt API] Health check: http://localhost:${port}/api/carkedit/health`);
 console.log(`[CarkedIt API] Serving client from: ${clientDir}`);
