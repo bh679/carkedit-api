@@ -2,6 +2,7 @@ import { Room, Client } from "colyseus";
 import { GameState } from "../schema/GameState";
 import { Player } from "../schema/Player";
 import { shuffle, createDeck } from "../utils/deck";
+import { computeDodTurnOrder } from "../utils/turnOrder";
 import { DIE_CARDS, LIVING_CARDS, BYE_CARDS } from "../data/cards";
 import { handleRevealDie, handleEndDieTurn } from "../phases/DiePhase";
 import { handleSubmitCard, handleRevealSubmission, handleEndConvinceTurn, handleSelectWinner } from "../phases/LivingPhase";
@@ -77,6 +78,11 @@ export class GameRoom extends Room<{ state: GameState }> {
     player.birthDay = (day >= 1 && day <= 31) ? day : 0;
     this.state.players.set(client.sessionId, player);
 
+    // Recalculate DoD turn order on every join so late joiners are incorporated
+    const newOrder = computeDodTurnOrder(this.state.players);
+    this.state.turnOrder.splice(0, this.state.turnOrder.length);
+    newOrder.forEach((id) => this.state.turnOrder.push(id));
+
     console.log(`[GameRoom] ${player.name} joined (${client.sessionId})`);
   }
 
@@ -129,12 +135,13 @@ export class GameRoom extends Room<{ state: GameState }> {
     shuffledLivingDeck.forEach((card) => this.state.livingDeck.push(card));
     shuffledByeDeck.forEach((card) => this.state.byeDeck.push(card));
 
-    const playerKeys = Array.from(this.state.players.keys());
-    const shuffledOrder = shuffle(playerKeys);
-    shuffledOrder.forEach((id) => this.state.turnOrder.push(id));
+    // Recompute DoD turn order at game start (handles any last-second joins)
+    const finalOrder = computeDodTurnOrder(this.state.players);
+    this.state.turnOrder.splice(0, this.state.turnOrder.length);
+    finalOrder.forEach((id) => this.state.turnOrder.push(id));
 
     // Deal 1 Die card per player from the dieDeck
-    for (const playerId of shuffledOrder) {
+    for (const playerId of finalOrder) {
       const player = this.state.players.get(playerId);
       if (!player) continue;
 
@@ -144,7 +151,7 @@ export class GameRoom extends Room<{ state: GameState }> {
       }
     }
 
-    this.state.currentTurn = shuffledOrder[0];
+    this.state.currentTurn = finalOrder[0];
     this.state.round = 1;
     this.state.phase = "die_phase";
 
