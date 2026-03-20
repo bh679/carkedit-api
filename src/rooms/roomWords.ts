@@ -21,6 +21,8 @@ const WORDS_3: readonly string[] = [
   "AWE", "BOY", "GAL", "HOP", "PAL", "TEA", "WIN", "ZEN", "YEN", "GIG",
   // Age & time
   "AGE", "BUB", "DAY", "NOW",
+  // Life & biology
+  "SEX",
 ];
 
 // 4-letter words
@@ -76,6 +78,8 @@ const WORDS_4: readonly string[] = [
   "TIME", "TREK", "TRUE", "VIBE", "WALK", "WARM", "WILD", "YARN", "YEAR", "ZEST",
   // Age & time
   "TEEN", "HOUR", "WEEK", "WHEN", "THEN", "ONLY", "WANT", "NEED", "ATOM", "DIRT",
+  // Life & biology
+  "KINK",
 ];
 
 // 5-letter words
