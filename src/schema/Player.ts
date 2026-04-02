@@ -12,4 +12,5 @@ export class Player extends Schema {
   @type([Card]) hand = new ArraySchema<Card>();
   @type("boolean") hasSubmitted: boolean = false;
   @type("boolean") hasBeenLivingDead: boolean = false;
+  @type("boolean") hasWildcard: boolean = false;
 }

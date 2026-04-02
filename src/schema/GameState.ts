@@ -7,6 +7,8 @@ export type GamePhase =
   | "die_phase"
   | "living_setup" | "living_submit" | "living_convince" | "living_select" | "living_winner"
   | "bye_setup" | "bye_submit" | "bye_convince" | "bye_select" | "bye_winner"
+  | "eulogy_intro" | "eulogy_pick" | "eulogy_speech" | "eulogy_judge" | "eulogy_points"
+  | "winner"
   | "game_over";
 
 export class GameState extends Schema {
@@ -27,4 +29,12 @@ export class GameState extends Schema {
   @type([Card]) byeDeck = new ArraySchema<Card>();
   @type([Card]) submittedCards = new ArraySchema<Card>();
   @type(["string"]) turnOrder = new ArraySchema<string>();
+
+  // Eulogy (Phase 4) state
+  @type("string") currentWildcardPlayer: string = "";
+  @type("number") currentWildcardIndex: number = 0;
+  @type(["string"]) wildcardPlayerIds = new ArraySchema<string>();
+  @type(["string"]) selectedEulogists = new ArraySchema<string>();
+  @type("number") currentEulogistIndex: number = 0;
+  @type("string") bestEulogist: string = "";
 }

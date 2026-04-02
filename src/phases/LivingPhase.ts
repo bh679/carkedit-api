@@ -1,5 +1,6 @@
 import { GameState } from "../schema/GameState.js";
 import { Client } from "colyseus";
+import { transitionToEulogy } from "./EulogyPhase.js";
 
 export function handleSubmitCard(state: GameState, client: Client, cardIndex: number): void {
   // Validate phase is living_submit or bye_submit
@@ -165,12 +166,8 @@ export function handleNextRound(state: GameState, _client?: Client): void {
       // Transition to Bye phase
       transitionToByeSetup(state);
     } else {
-      // Bye phase complete — game over
-      state.phase = "game_over";
-      console.log(`[GameOver] Game finished!`);
-      state.players.forEach((p) => {
-        console.log(`  ${p.name}: ${p.score} points`);
-      });
+      // Bye phase complete — transition to eulogy / winner
+      transitionToEulogy(state);
     }
   }
 }
@@ -281,6 +278,16 @@ function transitionToByeSetup(state: GameState): void {
         player.hand.push(card);
       }
     }
+
+    // Check if this player received any wildcard cards
+    let hasWildcard = false;
+    for (let i = 0; i < player.hand.length; i++) {
+      if (player.hand[i].special === "Wildcard") {
+        hasWildcard = true;
+        break;
+      }
+    }
+    player.hasWildcard = hasWildcard;
   }
 
   // Set first player as Living Dead for Bye phase
