@@ -1,11 +1,12 @@
 import { Room, Client } from "colyseus";
 import { GameState } from "../schema/GameState.js";
 import { Player } from "../schema/Player.js";
-import { shuffle, createDeck } from "../utils/deck.js";
+import { shuffle, createDeck, createByeDeckWithWildcards } from "../utils/deck.js";
 import { computeDodTurnOrder } from "../utils/turnOrder.js";
 import { DIE_CARDS, LIVING_CARDS, BYE_CARDS } from "../data/cards.js";
 import { handleRevealDie, handleEndDieTurn } from "../phases/DiePhase.js";
 import { handleSubmitCard, handleRevealSubmission, handleEndConvinceTurn, handleSelectWinner, handleNextRound } from "../phases/LivingPhase.js";
+import { handleStartEulogyRound, handleSelectEulogist, handleConfirmEulogists, handleDoneEulogy, handlePickBestEulogy, handleNextWildcard, handleRevealWinner } from "../phases/EulogyPhase.js";
 import { ROOM_CODE_WORDS } from "./roomWords.js";
 
 const MIN_PLAYERS = 2;
@@ -76,6 +77,37 @@ export class GameRoom extends Room<{ state: GameState }> {
       if (data.key === "autoStartOnReady" && typeof data.value === "boolean") {
         this.state.autoStartOnReady = data.value;
       }
+    });
+
+    // Eulogy (Phase 4) message handlers
+    this.onMessage("start_eulogy_round", (client) => {
+      handleStartEulogyRound(this.state, client);
+    });
+
+    this.onMessage("select_eulogist", (client, data: { sessionId: string }) => {
+      handleSelectEulogist(this.state, client, data.sessionId);
+    });
+
+    this.onMessage("confirm_eulogists", (client) => {
+      handleConfirmEulogists(this.state, client);
+    });
+
+    this.onMessage("done_eulogy", (client) => {
+      handleDoneEulogy(this.state, client);
+    });
+
+    this.onMessage("pick_best_eulogy", (client, data: { sessionId: string }) => {
+      handlePickBestEulogy(this.state, client, data.sessionId);
+      // Auto-advance after 5 seconds if in points phase
+      if (this.state.phase === "eulogy_points") {
+        this.clock.setTimeout(() => {
+          handleNextWildcard(this.state);
+        }, 5000);
+      }
+    });
+
+    this.onMessage("reveal_winner", (client) => {
+      handleRevealWinner(this.state, client);
     });
 
     this.onMessage("start_game", (client) => {
@@ -157,7 +189,7 @@ export class GameRoom extends Room<{ state: GameState }> {
 
     const shuffledDieDeck = shuffle(createDeck(DIE_CARDS, "die"));
     const shuffledLivingDeck = shuffle(createDeck(LIVING_CARDS, "living"));
-    const shuffledByeDeck = shuffle(createDeck(BYE_CARDS, "bye"));
+    const shuffledByeDeck = shuffle(createByeDeckWithWildcards(BYE_CARDS));
 
     shuffledDieDeck.forEach((card) => this.state.dieDeck.push(card));
     shuffledLivingDeck.forEach((card) => this.state.livingDeck.push(card));

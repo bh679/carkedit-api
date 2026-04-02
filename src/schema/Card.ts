@@ -6,4 +6,5 @@ export class Card extends Schema {
   @type("string") deck: string = "";        // "die", "living", or "bye" (replaces cardType)
   @type("boolean") faceUp: boolean = false;
   @type("string") submittedBy: string = ""; // Session ID of submitter (empty if not submitted)
+  @type("string") special: string = "";     // "Wildcard" for eulogy wildcard cards
 }

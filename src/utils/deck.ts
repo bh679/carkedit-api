@@ -21,3 +21,20 @@ export function createDeck(cards: CardData[], deckType: string): Card[] {
     return card;
   });
 }
+
+const WILDCARD_COUNT = 2;
+
+export function createByeDeckWithWildcards(cards: CardData[]): Card[] {
+  const deck = createDeck(cards, "bye");
+  for (let i = 0; i < WILDCARD_COUNT; i++) {
+    const card = new Card();
+    card.id = `wildcard-${i}`;
+    card.text = "Wildcard Eulogy";
+    card.deck = "bye";
+    card.faceUp = false;
+    card.submittedBy = "";
+    card.special = "Wildcard";
+    deck.push(card);
+  }
+  return deck;
+}
