@@ -4,7 +4,7 @@ import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom";
 
 const port = parseInt(process.env.PORT || "4500", 10);
-const clientDir = path.join(__dirname, "../../carkedit-client");
+const clientDir = process.env.CLIENT_DIR || path.join(__dirname, "../../carkedit-client");
 
 const server = defineServer({
   rooms: {

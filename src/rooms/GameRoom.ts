@@ -1,7 +1,7 @@
 import { Room, Client } from "colyseus";
 import { GameState } from "../schema/GameState";
 import { Player } from "../schema/Player";
-import { shuffle, createDeck } from "../utils/deck";
+import { shuffle, createDeck, createDieDeck } from "../utils/deck";
 import { computeDodTurnOrder } from "../utils/turnOrder";
 import { DIE_CARDS, LIVING_CARDS, BYE_CARDS } from "../data/cards";
 import { handleRevealDie, handleEndDieTurn } from "../phases/DiePhase";
@@ -61,6 +61,14 @@ export class GameRoom extends Room<{ state: GameState }> {
 
     this.onMessage("select_winner", (client, data: { cardIndex: number }) => {
       handleSelectWinner(this.state, client, data.cardIndex);
+    });
+
+    this.onMessage("start_game", (client) => {
+      if (this.state.phase !== "lobby") return;
+      if (this.state.players.size < MIN_PLAYERS) return;
+      // Only the Funeral Director (first in turn order) can start
+      if (this.state.turnOrder.length > 0 && this.state.turnOrder[0] !== client.sessionId) return;
+      this.startGame();
     });
 
     console.log(`[GameRoom] Room created`);
@@ -127,7 +135,7 @@ export class GameRoom extends Room<{ state: GameState }> {
   private startGame() {
     console.log(`[GameRoom] Game starting — creating decks`);
 
-    const shuffledDieDeck = shuffle(createDeck(DIE_CARDS, "die"));
+    const shuffledDieDeck = shuffle(createDieDeck(DIE_CARDS));
     const shuffledLivingDeck = shuffle(createDeck(LIVING_CARDS, "living"));
     const shuffledByeDeck = shuffle(createDeck(BYE_CARDS, "bye"));
 

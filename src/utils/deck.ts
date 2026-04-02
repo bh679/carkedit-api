@@ -1,4 +1,5 @@
 import { Card } from "../schema/Card";
+import { DieCardData } from "../data/cards";
 
 export function shuffle<T>(array: T[]): T[] {
   const shuffled = [...array];
@@ -15,6 +16,18 @@ export function createDeck(texts: string[], deckType: string): Card[] {
     card.id = `${deckType}-${index}`;
     card.text = text;
     card.deck = deckType;
+    card.faceUp = false;
+    card.submittedBy = "";
+    return card;
+  });
+}
+
+export function createDieDeck(cards: DieCardData[]): Card[] {
+  return cards.map((data) => {
+    const card = new Card();
+    card.id = String(data.id);
+    card.text = data.text;
+    card.deck = "die";
     card.faceUp = false;
     card.submittedBy = "";
     return card;
