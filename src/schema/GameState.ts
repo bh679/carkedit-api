@@ -5,8 +5,8 @@ import { Card } from "./Card.js";
 export type GamePhase =
   | "lobby"
   | "die_phase"
-  | "living_setup" | "living_submit" | "living_convince" | "living_select" | "living_winner"
-  | "bye_setup" | "bye_submit" | "bye_convince" | "bye_select" | "bye_winner"
+  | "living_setup" | "living_submit" | "living_convince" | "living_select"
+  | "bye_setup" | "bye_submit" | "bye_convince" | "bye_select"
   | "game_over";
 
 export class GameState extends Schema {
@@ -15,8 +15,6 @@ export class GameState extends Schema {
   @type("string") currentLivingDead: string = "";
   @type("string") convincingTurn: string = "";
   @type("number") round: number = 0;
-  @type("string") roundWinner: string = "";
-  @type("number") roundWinnerCardIndex: number = -1;
   @type("string") roomCode: string = "";
   @type("boolean") isPrivate: boolean = false;
   @type("boolean") autoStartOnReady: boolean = true;

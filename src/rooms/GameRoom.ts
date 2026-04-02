@@ -5,7 +5,7 @@ import { shuffle, createDeck, createDieDeck } from "../utils/deck.js";
 import { computeDodTurnOrder } from "../utils/turnOrder.js";
 import { DIE_CARDS, LIVING_CARDS, BYE_CARDS } from "../data/cards.js";
 import { handleRevealDie, handleEndDieTurn } from "../phases/DiePhase.js";
-import { handleSubmitCard, handleRevealSubmission, handleEndConvinceTurn, handleSelectWinner, handleNextRound } from "../phases/LivingPhase.js";
+import { handleSubmitCard, handleRevealSubmission, handleEndConvinceTurn, handleSelectWinner } from "../phases/LivingPhase.js";
 import { ROOM_CODE_WORDS } from "./roomWords.js";
 
 const MIN_PLAYERS = 2;
@@ -61,12 +61,6 @@ export class GameRoom extends Room<{ state: GameState }> {
 
     this.onMessage("select_winner", (client, data: { cardIndex: number }) => {
       handleSelectWinner(this.state, client, data.cardIndex);
-      // Auto-advance after 5 seconds if still in winner phase
-      if (this.state.phase === "living_winner" || this.state.phase === "bye_winner") {
-        this.clock.setTimeout(() => {
-          handleNextRound(this.state);
-        }, 5000);
-      }
     });
 
     this.onMessage("setting", (client, data: { key: string; value: any }) => {
