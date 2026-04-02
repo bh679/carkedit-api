@@ -64,8 +64,8 @@ export class GameRoom extends Room<{ state: GameState }> {
     });
 
     this.onMessage("setting", (client, data: { key: string; value: any }) => {
-      // Only the host (first in turn order) can change settings
-      if (this.state.turnOrder.length > 0 && this.state.turnOrder[0] !== client.sessionId) return;
+      // Only the host (room creator) can change settings
+      if (this.state.hostId && this.state.hostId !== client.sessionId) return;
       if (this.state.phase !== "lobby") return;
       if (data.key === "autoStartOnReady" && typeof data.value === "boolean") {
         this.state.autoStartOnReady = data.value;
@@ -75,8 +75,8 @@ export class GameRoom extends Room<{ state: GameState }> {
     this.onMessage("start_game", (client) => {
       if (this.state.phase !== "lobby") return;
       if (this.state.players.size < MIN_PLAYERS) return;
-      // Only the Funeral Director (first in turn order) can start
-      if (this.state.turnOrder.length > 0 && this.state.turnOrder[0] !== client.sessionId) return;
+      // Only the host (room creator) can start the game
+      if (this.state.hostId && this.state.hostId !== client.sessionId) return;
       this.startGame();
     });
 
@@ -94,6 +94,11 @@ export class GameRoom extends Room<{ state: GameState }> {
     player.birthMonth = (month >= 1 && month <= 12) ? month : 0;
     player.birthDay = (day >= 1 && day <= 31) ? day : 0;
     this.state.players.set(client.sessionId, player);
+
+    // First player to join becomes the host
+    if (!this.state.hostId) {
+      this.state.hostId = client.sessionId;
+    }
 
     // Recalculate DoD turn order on every join so late joiners are incorporated
     const newOrder = computeDodTurnOrder(this.state.players);
