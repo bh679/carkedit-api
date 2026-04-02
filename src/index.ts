@@ -1,8 +1,10 @@
 import path from "path";
+import { fileURLToPath } from "url";
 import express from "express";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
-import { GameRoom } from "./rooms/GameRoom";
+import { GameRoom } from "./rooms/GameRoom.js";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "4500", 10);
 const clientDir = path.join(__dirname, "../../carkedit-client");
 

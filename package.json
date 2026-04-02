@@ -2,6 +2,7 @@
   "name": "carkedit-api",
   "version": "0.01.0005",
   "description": "CarkedIt multiplayer card game server",
+  "type": "module",
   "main": "src/index.ts",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",

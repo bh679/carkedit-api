@@ -1,12 +1,12 @@
 import { Room, Client } from "colyseus";
-import { GameState } from "../schema/GameState";
-import { Player } from "../schema/Player";
-import { shuffle, createDeck } from "../utils/deck";
-import { computeDodTurnOrder } from "../utils/turnOrder";
-import { DIE_CARDS, LIVING_CARDS, BYE_CARDS } from "../data/cards";
-import { handleRevealDie, handleEndDieTurn } from "../phases/DiePhase";
-import { handleSubmitCard, handleRevealSubmission, handleEndConvinceTurn, handleSelectWinner } from "../phases/LivingPhase";
-import { ROOM_CODE_WORDS } from "./roomWords";
+import { GameState } from "../schema/GameState.js";
+import { Player } from "../schema/Player.js";
+import { shuffle, createDeck } from "../utils/deck.js";
+import { computeDodTurnOrder } from "../utils/turnOrder.js";
+import { DIE_CARDS, LIVING_CARDS, BYE_CARDS } from "../data/cards.js";
+import { handleRevealDie, handleEndDieTurn } from "../phases/DiePhase.js";
+import { handleSubmitCard, handleRevealSubmission, handleEndConvinceTurn, handleSelectWinner } from "../phases/LivingPhase.js";
+import { ROOM_CODE_WORDS } from "./roomWords.js";
 
 const MIN_PLAYERS = 2;
 

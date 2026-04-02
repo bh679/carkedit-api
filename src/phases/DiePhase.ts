@@ -1,4 +1,4 @@
-import { GameState } from "../schema/GameState";
+import { GameState } from "../schema/GameState.js";
 import { Client } from "colyseus";
 
 const CARDS_PER_PLAYER = 5;

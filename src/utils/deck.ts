@@ -1,4 +1,4 @@
-import { Card } from "../schema/Card";
+import { Card } from "../schema/Card.js";
 
 export function shuffle<T>(array: T[]): T[] {
   const shuffled = [...array];

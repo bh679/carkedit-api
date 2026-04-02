@@ -1,4 +1,4 @@
-import { GameState } from "../schema/GameState";
+import { GameState } from "../schema/GameState.js";
 import { Client } from "colyseus";
 
 export function handleSubmitCard(state: GameState, client: Client, cardIndex: number): void {

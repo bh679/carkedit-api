@@ -1,6 +1,6 @@
 import { Schema, MapSchema, ArraySchema, type } from "@colyseus/schema";
-import { Player } from "./Player";
-import { Card } from "./Card";
+import { Player } from "./Player.js";
+import { Card } from "./Card.js";
 
 export type GamePhase =
   | "lobby"

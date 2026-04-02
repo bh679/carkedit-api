@@ -1,5 +1,5 @@
 import { MapSchema } from "@colyseus/schema";
-import { Player } from "../schema/Player";
+import { Player } from "../schema/Player.js";
 
 // Day of the Dead: November 1
 const DOD_MONTH = 11;
