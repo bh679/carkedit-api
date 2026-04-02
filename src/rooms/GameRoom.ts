@@ -63,6 +63,15 @@ export class GameRoom extends Room<{ state: GameState }> {
       handleSelectWinner(this.state, client, data.cardIndex);
     });
 
+    this.onMessage("setting", (client, data: { key: string; value: any }) => {
+      // Only the host (first in turn order) can change settings
+      if (this.state.turnOrder.length > 0 && this.state.turnOrder[0] !== client.sessionId) return;
+      if (this.state.phase !== "lobby") return;
+      if (data.key === "autoStartOnReady" && typeof data.value === "boolean") {
+        this.state.autoStartOnReady = data.value;
+      }
+    });
+
     this.onMessage("start_game", (client) => {
       if (this.state.phase !== "lobby") return;
       if (this.state.players.size < MIN_PLAYERS) return;
@@ -119,7 +128,7 @@ export class GameRoom extends Room<{ state: GameState }> {
     player.ready = !player.ready;
 
     const allReady = this.checkAllReady();
-    if (allReady && this.state.players.size >= MIN_PLAYERS) {
+    if (allReady && this.state.autoStartOnReady && this.state.players.size >= MIN_PLAYERS) {
       this.startGame();
     }
   }

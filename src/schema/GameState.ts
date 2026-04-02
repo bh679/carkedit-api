@@ -17,6 +17,7 @@ export class GameState extends Schema {
   @type("number") round: number = 0;
   @type("string") roomCode: string = "";
   @type("boolean") isPrivate: boolean = false;
+  @type("boolean") autoStartOnReady: boolean = true;
   @type({ map: Player }) players = new MapSchema<Player>();
   @type([Card]) dieDeck = new ArraySchema<Card>();
   @type([Card]) livingDeck = new ArraySchema<Card>();
