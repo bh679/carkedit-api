@@ -1,0 +1,10 @@
+#!/bin/bash
+branch=$(git rev-parse --abbrev-ref HEAD)
+if [ "$branch" = "main" ]; then
+  echo ""
+  echo "ERROR: Direct commits to main are not allowed."
+  echo "Create a worktree and feature branch first:"
+  echo "  git worktree add ../worktrees/<feature-slug> -b dev/<feature-slug>"
+  echo ""
+  exit 1
+fi

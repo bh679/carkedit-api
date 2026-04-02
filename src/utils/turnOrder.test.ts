@@ -1,6 +1,6 @@
 import { MapSchema } from "@colyseus/schema";
-import { Player } from "../schema/Player";
-import { computeDodTurnOrder } from "./turnOrder";
+import { Player } from "../schema/Player.js";
+import { computeDodTurnOrder } from "./turnOrder.js";
 
 function makePlayer(sessionId: string, birthMonth: number, birthDay: number): Player {
   const p = new Player();
