@@ -1,12 +1,11 @@
 import { Room, Client } from "colyseus";
-import { GameState } from "../schema/GameState.js";
-import { Player } from "../schema/Player.js";
-import { shuffle, createDeck, createDieDeck } from "../utils/deck.js";
-import { computeDodTurnOrder } from "../utils/turnOrder.js";
-import { DIE_CARDS, LIVING_CARDS, BYE_CARDS } from "../data/cards.js";
-import { handleRevealDie, handleEndDieTurn } from "../phases/DiePhase.js";
-import { handleSubmitCard, handleRevealSubmission, handleEndConvinceTurn, handleSelectWinner } from "../phases/LivingPhase.js";
-import { ROOM_CODE_WORDS } from "./roomWords.js";
+import { GameState } from "../schema/GameState";
+import { Player } from "../schema/Player";
+import { shuffle, createDeck } from "../utils/deck";
+import { DIE_CARDS, LIVING_CARDS, BYE_CARDS } from "../data/cards";
+import { handleRevealDie, handleEndDieTurn } from "../phases/DiePhase";
+import { handleSubmitCard, handleRevealSubmission, handleEndConvinceTurn, handleSelectWinner } from "../phases/LivingPhase";
+import { ROOM_CODE_WORDS } from "./roomWords";
 
 const MIN_PLAYERS = 2;
 
@@ -63,23 +62,6 @@ export class GameRoom extends Room<{ state: GameState }> {
       handleSelectWinner(this.state, client, data.cardIndex);
     });
 
-    this.onMessage("setting", (client, data: { key: string; value: any }) => {
-      // Only the host (first in turn order) can change settings
-      if (this.state.turnOrder.length > 0 && this.state.turnOrder[0] !== client.sessionId) return;
-      if (this.state.phase !== "lobby") return;
-      if (data.key === "autoStartOnReady" && typeof data.value === "boolean") {
-        this.state.autoStartOnReady = data.value;
-      }
-    });
-
-    this.onMessage("start_game", (client) => {
-      if (this.state.phase !== "lobby") return;
-      if (this.state.players.size < MIN_PLAYERS) return;
-      // Only the Funeral Director (first in turn order) can start
-      if (this.state.turnOrder.length > 0 && this.state.turnOrder[0] !== client.sessionId) return;
-      this.startGame();
-    });
-
     console.log(`[GameRoom] Room created`);
   }
 
@@ -94,11 +76,6 @@ export class GameRoom extends Room<{ state: GameState }> {
     player.birthMonth = (month >= 1 && month <= 12) ? month : 0;
     player.birthDay = (day >= 1 && day <= 31) ? day : 0;
     this.state.players.set(client.sessionId, player);
-
-    // Recalculate DoD turn order on every join so late joiners are incorporated
-    const newOrder = computeDodTurnOrder(this.state.players);
-    this.state.turnOrder.splice(0, this.state.turnOrder.length);
-    newOrder.forEach((id) => this.state.turnOrder.push(id));
 
     console.log(`[GameRoom] ${player.name} joined (${client.sessionId})`);
   }
@@ -128,7 +105,7 @@ export class GameRoom extends Room<{ state: GameState }> {
     player.ready = !player.ready;
 
     const allReady = this.checkAllReady();
-    if (allReady && this.state.autoStartOnReady && this.state.players.size >= MIN_PLAYERS) {
+    if (allReady && this.state.players.size >= MIN_PLAYERS) {
       this.startGame();
     }
   }
@@ -144,7 +121,7 @@ export class GameRoom extends Room<{ state: GameState }> {
   private startGame() {
     console.log(`[GameRoom] Game starting — creating decks`);
 
-    const shuffledDieDeck = shuffle(createDieDeck(DIE_CARDS));
+    const shuffledDieDeck = shuffle(createDeck(DIE_CARDS, "die"));
     const shuffledLivingDeck = shuffle(createDeck(LIVING_CARDS, "living"));
     const shuffledByeDeck = shuffle(createDeck(BYE_CARDS, "bye"));
 
@@ -152,13 +129,12 @@ export class GameRoom extends Room<{ state: GameState }> {
     shuffledLivingDeck.forEach((card) => this.state.livingDeck.push(card));
     shuffledByeDeck.forEach((card) => this.state.byeDeck.push(card));
 
-    // Recompute DoD turn order at game start (handles any last-second joins)
-    const finalOrder = computeDodTurnOrder(this.state.players);
-    this.state.turnOrder.splice(0, this.state.turnOrder.length);
-    finalOrder.forEach((id) => this.state.turnOrder.push(id));
+    const playerKeys = Array.from(this.state.players.keys());
+    const shuffledOrder = shuffle(playerKeys);
+    shuffledOrder.forEach((id) => this.state.turnOrder.push(id));
 
     // Deal 1 Die card per player from the dieDeck
-    for (const playerId of finalOrder) {
+    for (const playerId of shuffledOrder) {
       const player = this.state.players.get(playerId);
       if (!player) continue;
 
@@ -168,7 +144,7 @@ export class GameRoom extends Room<{ state: GameState }> {
       }
     }
 
-    this.state.currentTurn = finalOrder[0];
+    this.state.currentTurn = shuffledOrder[0];
     this.state.round = 1;
     this.state.phase = "die_phase";
 
