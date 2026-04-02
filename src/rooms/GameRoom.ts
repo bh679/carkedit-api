@@ -1,7 +1,7 @@
 import { Room, Client } from "colyseus";
 import { GameState } from "../schema/GameState.js";
 import { Player } from "../schema/Player.js";
-import { shuffle, createDeck, createDieDeck, createByeDeckWithWildcards } from "../utils/deck.js";
+import { shuffle, createDeck, createByeDeckWithWildcards } from "../utils/deck.js";
 import { computeDodTurnOrder } from "../utils/turnOrder.js";
 import { DIE_CARDS, LIVING_CARDS, BYE_CARDS } from "../data/cards.js";
 import { handleRevealDie, handleEndDieTurn } from "../phases/DiePhase.js";
@@ -187,7 +187,7 @@ export class GameRoom extends Room<{ state: GameState }> {
   private startGame() {
     console.log(`[GameRoom] Game starting — creating decks`);
 
-    const shuffledDieDeck = shuffle(createDieDeck(DIE_CARDS));
+    const shuffledDieDeck = shuffle(createDeck(DIE_CARDS, "die"));
     const shuffledLivingDeck = shuffle(createDeck(LIVING_CARDS, "living"));
     const shuffledByeDeck = shuffle(createByeDeckWithWildcards(BYE_CARDS));
 
