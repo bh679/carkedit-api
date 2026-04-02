@@ -106,6 +106,29 @@ export function handleSelectWinner(state: GameState, client: Client, cardIndex: 
     console.log(`[LivingPhase] ${winner.name} wins this round! Score: ${winner.score}`);
   }
 
+  // Store winner info for announcement
+  state.roundWinner = winnerId;
+  state.roundWinnerCardIndex = cardIndex;
+
+  // Transition to winner announcement phase
+  if (state.phase === "living_select") {
+    state.phase = "living_winner";
+  } else {
+    state.phase = "bye_winner";
+  }
+}
+
+export function handleNextRound(state: GameState, _client?: Client): void {
+  // Validate phase
+  const validPhases = ["living_winner", "bye_winner"];
+  if (!validPhases.includes(state.phase)) return;
+
+  const wasLiving = state.phase === "living_winner";
+
+  // Clear winner info
+  state.roundWinner = "";
+  state.roundWinnerCardIndex = -1;
+
   // Mark current Living Dead as having been Living Dead
   const livingDead = state.players.get(state.currentLivingDead);
   if (livingDead) {
@@ -129,8 +152,7 @@ export function handleSelectWinner(state: GameState, client: Client, cardIndex: 
     state.currentTurn = nextLivingDead;
     state.round++;
 
-    // Determine if we're in living or bye phase and go back to submit
-    if (state.phase === "living_select") {
+    if (wasLiving) {
       state.phase = "living_submit";
     } else {
       state.phase = "bye_submit";
@@ -139,14 +161,13 @@ export function handleSelectWinner(state: GameState, client: Client, cardIndex: 
     console.log(`[LivingPhase] Next Living Dead: ${nextLivingDead}`);
   } else {
     // All players have been Living Dead
-    if (state.phase === "living_select") {
+    if (wasLiving) {
       // Transition to Bye phase
       transitionToByeSetup(state);
     } else {
       // Bye phase complete — game over
       state.phase = "game_over";
       console.log(`[GameOver] Game finished!`);
-      // Log final scores
       state.players.forEach((p) => {
         console.log(`  ${p.name}: ${p.score} points`);
       });
