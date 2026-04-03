@@ -84,3 +84,28 @@ export interface CardStat {
   win_count: number;
   win_rate: number;
 }
+
+export interface GameEvent {
+  room_id: string;
+  game_id?: string;
+  event_type: string;
+  actor_session_id?: string;
+  actor_name?: string;
+  phase?: string;
+  round?: number;
+  data_json?: string;
+  created_at: string;
+}
+
+export interface GameEventRow {
+  id: number;
+  room_id: string;
+  game_id: string | null;
+  event_type: string;
+  actor_session_id: string | null;
+  actor_name: string | null;
+  phase: string | null;
+  round: number | null;
+  data_json: string | null;
+  created_at: string;
+}
