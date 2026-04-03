@@ -8,10 +8,10 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger production deploy (server + client)
+      - name: Trigger production deploy (server)
         run: |
           RESPONSE=$(curl -s -w "\n%{http_code}" \
-            "https://brennan.games/carkedit/deploy.php?token=${{ secrets.DEPLOY_TOKEN }}&target=server")
+            "https://brennan.games/deploy-carkedit-api.php?token=${{ secrets.DEPLOY_TOKEN }}")
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
           BODY=$(echo "$RESPONSE" | head -n -1)
           echo "Response: $BODY"
@@ -21,4 +21,4 @@ jobs:
             exit 1
           fi
           echo "$BODY" | jq -r '.status' | grep -q "ok" || { echo "::error::Deploy status not ok"; exit 1; }
-          echo "Server + client deploy successful!"
+          echo "Server deploy successful!"
