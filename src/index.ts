@@ -136,7 +136,7 @@ const server = defineServer({
           dateTo: _req.query.dateTo as string || undefined,
           errorsOnly: _req.query.errorsOnly === 'true',
           devFilter: (['all', 'dev', 'nodev'].includes(_req.query.dev) ? _req.query.dev : 'all') as any,
-          statusFilter: (['all', 'finished', 'unfinished'].includes(_req.query.status) ? _req.query.status : 'all') as any,
+          statusFilter: (['all', 'finished', 'abandoned', 'live'].includes(_req.query.status) ? _req.query.status : 'all') as any,
         });
         res.json(result);
       } catch (err) {

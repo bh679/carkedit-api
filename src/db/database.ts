@@ -157,7 +157,7 @@ export interface GameFilters {
   dateTo?: string;
   errorsOnly?: boolean;
   devFilter?: 'all' | 'dev' | 'nodev';
-  statusFilter?: 'all' | 'finished' | 'unfinished';
+  statusFilter?: 'all' | 'finished' | 'abandoned' | 'live';
 }
 
 export function getRecentGames(filters: GameFilters = {}): { games: GameSummary[]; total: number } {
@@ -172,7 +172,8 @@ export function getRecentGames(filters: GameFilters = {}): { games: GameSummary[
   if (devFilter === 'dev') { conditions.push('is_dev = 1'); }
   if (devFilter === 'nodev') { conditions.push('is_dev = 0'); }
   if (statusFilter === 'finished') { conditions.push("status = 'finished'"); }
-  if (statusFilter === 'unfinished') { conditions.push("status != 'finished'"); }
+  if (statusFilter === 'abandoned') { conditions.push("live_status = 'abandoned'"); }
+  if (statusFilter === 'live') { conditions.push("live_status = 'live'"); }
 
   const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
 
@@ -218,10 +219,12 @@ export function getGameById(id: string): GameDetail | null {
   return game;
 }
 
-export function getStats(): { finishedGames: number; totalGames: number; unfinishedGames: number; totalPlayers: number; totalPlayTime: number; avgPlayTime: number; medianPlayTime: number; longestPlayTime: number } {
+export function getStats(): { finishedGames: number; totalGames: number; unfinishedGames: number; abandonedGames: number; liveGames: number; totalPlayers: number; totalPlayTime: number; avgPlayTime: number; medianPlayTime: number; longestPlayTime: number } {
   const finishedGames = (db.prepare("SELECT COUNT(*) as c FROM games WHERE status = 'finished'").get() as any).c;
   const totalGames = (db.prepare("SELECT COUNT(*) as c FROM games").get() as any).c;
   const unfinishedGames = totalGames - finishedGames;
+  const abandonedGames = (db.prepare("SELECT COUNT(*) as c FROM games WHERE live_status = 'abandoned'").get() as any).c;
+  const liveGames = (db.prepare("SELECT COUNT(*) as c FROM games WHERE live_status = 'live'").get() as any).c;
   const totalPlayers = (db.prepare("SELECT COALESCE(SUM(player_count), 0) as c FROM games WHERE status = 'finished'").get() as any).c;
   const totalPlayTime = (db.prepare("SELECT COALESCE(SUM(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL").get() as any).c;
   const avgPlayTime = (db.prepare("SELECT COALESCE(AVG(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL").get() as any).c;
@@ -236,13 +239,15 @@ export function getStats(): { finishedGames: number; totalGames: number; unfinis
 
   const longestPlayTime = (db.prepare("SELECT COALESCE(MAX(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL").get() as any).c;
 
-  return { finishedGames, totalGames, unfinishedGames, totalPlayers, totalPlayTime, avgPlayTime: Math.round(avgPlayTime), medianPlayTime: Math.round(medianPlayTime), longestPlayTime };
+  return { finishedGames, totalGames, unfinishedGames, abandonedGames, liveGames, totalPlayers, totalPlayTime, avgPlayTime: Math.round(avgPlayTime), medianPlayTime: Math.round(medianPlayTime), longestPlayTime };
 }
 
-export function getStatsByPeriod(since: string): { finishedGames: number; totalGames: number; unfinishedGames: number; totalPlayers: number; totalPlayTime: number; avgPlayTime: number; medianPlayTime: number; longestPlayTime: number } {
+export function getStatsByPeriod(since: string): { finishedGames: number; totalGames: number; unfinishedGames: number; abandonedGames: number; liveGames: number; totalPlayers: number; totalPlayTime: number; avgPlayTime: number; medianPlayTime: number; longestPlayTime: number } {
   const finishedGames = (db.prepare("SELECT COUNT(*) as c FROM games WHERE status = 'finished' AND finished_at >= ?").get(since) as any).c;
   const totalGames = (db.prepare("SELECT COUNT(*) as c FROM games WHERE finished_at >= ?").get(since) as any).c;
   const unfinishedGames = totalGames - finishedGames;
+  const abandonedGames = (db.prepare("SELECT COUNT(*) as c FROM games WHERE live_status = 'abandoned' AND finished_at >= ?").get(since) as any).c;
+  const liveGames = (db.prepare("SELECT COUNT(*) as c FROM games WHERE live_status = 'live' AND finished_at >= ?").get(since) as any).c;
   const totalPlayers = (db.prepare("SELECT COALESCE(SUM(player_count), 0) as c FROM games WHERE status = 'finished' AND finished_at >= ?").get(since) as any).c;
   const totalPlayTime = (db.prepare("SELECT COALESCE(SUM(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL AND finished_at >= ?").get(since) as any).c;
   const avgPlayTime = (db.prepare("SELECT COALESCE(AVG(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL AND finished_at >= ?").get(since) as any).c;
@@ -256,7 +261,7 @@ export function getStatsByPeriod(since: string): { finishedGames: number; totalG
 
   const longestPlayTime = (db.prepare("SELECT COALESCE(MAX(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL AND finished_at >= ?").get(since) as any).c;
 
-  return { finishedGames, totalGames, unfinishedGames, totalPlayers, totalPlayTime, avgPlayTime: Math.round(avgPlayTime), medianPlayTime: Math.round(medianPlayTime), longestPlayTime };
+  return { finishedGames, totalGames, unfinishedGames, abandonedGames, liveGames, totalPlayers, totalPlayTime, avgPlayTime: Math.round(avgPlayTime), medianPlayTime: Math.round(medianPlayTime), longestPlayTime };
 }
 
 export function saveCardPlays(plays: CardPlay[]): void {
