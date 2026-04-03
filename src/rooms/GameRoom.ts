@@ -232,7 +232,7 @@ export class GameRoom extends Room<{ state: GameState }> {
 
     const shuffledDieDeck = shuffle(createDeck(DIE_CARDS, "die"));
     const shuffledLivingDeck = shuffle(createDeck(LIVING_CARDS, "living"));
-    const shuffledByeDeck = shuffle(createByeDeckWithWildcards(BYE_CARDS));
+    const shuffledByeDeck = shuffle(createByeDeckWithWildcards(BYE_CARDS, this.state.wildcardCount));
 
     shuffledDieDeck.forEach((card) => this.state.dieDeck.push(card));
     shuffledLivingDeck.forEach((card) => this.state.livingDeck.push(card));

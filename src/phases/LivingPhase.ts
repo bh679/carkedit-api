@@ -163,12 +163,36 @@ export function handleNextRound(state: GameState, _client?: Client): void {
   } else {
     // All players have been Living Dead
     if (wasLiving) {
-      // Transition to Bye phase
-      transitionToByeSetup(state);
+      transitionAfterLiving(state);
     } else {
-      // Bye phase complete — transition to eulogy / winner
-      transitionToEulogy(state);
+      transitionAfterBye(state);
     }
+  }
+}
+
+/**
+ * After living phase, transition to the first enabled of: bye → eulogy → winner
+ */
+export function transitionAfterLiving(state: GameState): void {
+  if (state.enableBye) {
+    transitionToByeSetup(state);
+  } else if (state.enableEulogy) {
+    transitionToEulogy(state);
+  } else {
+    state.phase = "winner";
+    console.log(`[LivingPhase] Bye+Eulogy disabled — going to winner`);
+  }
+}
+
+/**
+ * After bye phase, transition to eulogy or winner based on settings
+ */
+function transitionAfterBye(state: GameState): void {
+  if (state.enableEulogy) {
+    transitionToEulogy(state);
+  } else {
+    state.phase = "winner";
+    console.log(`[ByePhase] Eulogy disabled — going to winner`);
   }
 }
 
@@ -253,10 +277,8 @@ function getNextLivingDead(state: GameState): string | null {
   return null;
 }
 
-function transitionToByeSetup(state: GameState): void {
+export function transitionToByeSetup(state: GameState): void {
   console.log(`[LivingPhase] Living phase complete — transitioning to Bye phase`);
-
-  const CARDS_PER_PLAYER = 5;
 
   // Clear hands and reset Living Dead tracking
   state.players.forEach((player) => {
@@ -265,13 +287,13 @@ function transitionToByeSetup(state: GameState): void {
     player.hasSubmitted = false;
   });
 
-  // Deal 5 Bye cards per player
+  // Deal handSize Bye cards per player (using state.handSize)
   const playerIds = Array.from(state.turnOrder);
   for (const playerId of playerIds) {
     const player = state.players.get(playerId);
     if (!player) continue;
 
-    for (let i = 0; i < CARDS_PER_PLAYER; i++) {
+    for (let i = 0; i < state.handSize; i++) {
       if (state.byeDeck.length > 0) {
         const card = state.byeDeck.splice(0, 1)[0];
         card.faceUp = true;

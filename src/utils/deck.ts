@@ -22,11 +22,9 @@ export function createDeck(cards: CardData[], deckType: string): Card[] {
   });
 }
 
-const WILDCARD_COUNT = 2;
-
-export function createByeDeckWithWildcards(cards: CardData[]): Card[] {
+export function createByeDeckWithWildcards(cards: CardData[], wildcardCount: number = 2): Card[] {
   const deck = createDeck(cards, "bye");
-  for (let i = 0; i < WILDCARD_COUNT; i++) {
+  for (let i = 0; i < wildcardCount; i++) {
     const card = new Card();
     card.id = `wildcard-${i}`;
     card.text = "Wildcard Eulogy";

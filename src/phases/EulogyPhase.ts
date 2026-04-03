@@ -1,7 +1,7 @@
 import { GameState } from "../schema/GameState.js";
 import { Client } from "colyseus";
 
-const EULOGIST_COUNT = 2;
+// Eulogist count is now read from state.eulogistCount
 
 /**
  * Transition from bye phase to eulogy. Detects wildcard holders.
@@ -63,7 +63,7 @@ export function handleStartEulogyRound(state: GameState, client: Client): void {
     if (id !== state.currentWildcardPlayer) otherPlayers.push(id);
   });
 
-  const requiredCount = Math.min(EULOGIST_COUNT, otherPlayers.length);
+  const requiredCount = Math.min(state.eulogistCount, otherPlayers.length);
   if (otherPlayers.length === requiredCount) {
     otherPlayers.forEach((id) => state.selectedEulogists.push(id));
     state.phase = "eulogy_speech";
@@ -95,7 +95,7 @@ export function handleSelectEulogist(state: GameState, client: Client, targetSes
     state.selectedEulogists.splice(idx, 1);
   } else {
     const otherCount = state.turnOrder.length - 1;
-    const requiredCount = Math.min(EULOGIST_COUNT, otherCount);
+    const requiredCount = Math.min(state.eulogistCount, otherCount);
     if (state.selectedEulogists.length < requiredCount) {
       state.selectedEulogists.push(targetSessionId);
     } else {
@@ -114,7 +114,7 @@ export function handleConfirmEulogists(state: GameState, client: Client): void {
   if (state.currentWildcardPlayer !== client.sessionId) return;
 
   const otherCount = state.turnOrder.length - 1;
-  const requiredCount = Math.min(EULOGIST_COUNT, otherCount);
+  const requiredCount = Math.min(state.eulogistCount, otherCount);
   if (state.selectedEulogists.length !== requiredCount) return;
 
   state.currentEulogistIndex = 0;
