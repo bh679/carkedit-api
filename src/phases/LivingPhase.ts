@@ -111,6 +111,26 @@ export function handleSelectWinner(state: GameState, client: Client, cardIndex: 
   state.roundWinner = winnerId;
   state.roundWinnerCardIndex = cardIndex;
 
+  // Transfer wildcard ownership to the Living Dead (chooser) if a wildcard was chosen
+  if (state.phase === "bye_select" && winningCard.special === "Wildcard") {
+    const livingDead = state.players.get(state.currentLivingDead);
+    if (livingDead) {
+      livingDead.hasWildcard = true;
+      console.log(`[LivingPhase] Wildcard chosen — transferring ownership to ${livingDead.name}`);
+    }
+    // Remove from submitter if they have no other wildcards in hand
+    if (winner && winnerId !== state.currentLivingDead) {
+      let hasOtherWildcard = false;
+      for (let i = 0; i < winner.hand.length; i++) {
+        if (winner.hand[i].special === "Wildcard") {
+          hasOtherWildcard = true;
+          break;
+        }
+      }
+      winner.hasWildcard = hasOtherWildcard;
+    }
+  }
+
   // Transition to winner announcement phase
   if (state.phase === "living_select") {
     state.phase = "living_winner";
