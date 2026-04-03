@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import type { GameResult, GameSummary, GameDetail, GameDetailCardPlay, GamePlayerResult, CardPlay, CardStat, IssueReport } from './types.js';
+import type { GameResult, GameSummary, GameDetail, GameDetailCardPlay, GamePlayerResult, CardPlay, CardStat, IssueReport, GameEvent, GameEventRow } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.resolve(__dirname, '../../data/games.db');
@@ -80,6 +80,23 @@ export function initDatabase(): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_issue_reports_created_at ON issue_reports(created_at);
+
+    CREATE TABLE IF NOT EXISTS game_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      game_id TEXT,
+      room_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      actor_session_id TEXT,
+      actor_name TEXT,
+      phase TEXT,
+      round INTEGER,
+      data_json TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_game_events_room_id ON game_events(room_id);
+    CREATE INDEX IF NOT EXISTS idx_game_events_game_id ON game_events(game_id);
+    CREATE INDEX IF NOT EXISTS idx_game_events_type ON game_events(event_type);
   `);
 
   // Migrate: add new columns if they don't exist (for existing DBs)
@@ -220,6 +237,26 @@ export function getStats(): { finishedGames: number; totalGames: number; unfinis
   return { finishedGames, totalGames, unfinishedGames, totalPlayers, totalPlayTime, avgPlayTime: Math.round(avgPlayTime), medianPlayTime: Math.round(medianPlayTime), longestPlayTime };
 }
 
+export function getStatsByPeriod(since: string): { finishedGames: number; totalGames: number; unfinishedGames: number; totalPlayers: number; totalPlayTime: number; avgPlayTime: number; medianPlayTime: number; longestPlayTime: number } {
+  const finishedGames = (db.prepare("SELECT COUNT(*) as c FROM games WHERE status = 'finished' AND finished_at >= ?").get(since) as any).c;
+  const totalGames = (db.prepare("SELECT COUNT(*) as c FROM games WHERE finished_at >= ?").get(since) as any).c;
+  const unfinishedGames = totalGames - finishedGames;
+  const totalPlayers = (db.prepare("SELECT COALESCE(SUM(player_count), 0) as c FROM games WHERE status = 'finished' AND finished_at >= ?").get(since) as any).c;
+  const totalPlayTime = (db.prepare("SELECT COALESCE(SUM(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL AND finished_at >= ?").get(since) as any).c;
+  const avgPlayTime = (db.prepare("SELECT COALESCE(AVG(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL AND finished_at >= ?").get(since) as any).c;
+
+  const durations = db.prepare("SELECT duration_seconds FROM games WHERE duration_seconds IS NOT NULL AND finished_at >= ? ORDER BY duration_seconds").all(since).map((r: any) => r.duration_seconds);
+  let medianPlayTime = 0;
+  if (durations.length > 0) {
+    const mid = Math.floor(durations.length / 2);
+    medianPlayTime = durations.length % 2 === 0 ? (durations[mid - 1] + durations[mid]) / 2 : durations[mid];
+  }
+
+  const longestPlayTime = (db.prepare("SELECT COALESCE(MAX(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL AND finished_at >= ?").get(since) as any).c;
+
+  return { finishedGames, totalGames, unfinishedGames, totalPlayers, totalPlayTime, avgPlayTime: Math.round(avgPlayTime), medianPlayTime: Math.round(medianPlayTime), longestPlayTime };
+}
+
 export function saveCardPlays(plays: CardPlay[]): void {
   const insert = db.prepare(`
     INSERT INTO card_plays (game_id, round, phase, card_id, card_text, card_deck, player_name, is_winner)
@@ -278,4 +315,39 @@ export function getIssueReports(limit = 50, offset = 0): { reports: IssueReport[
     'SELECT * FROM issue_reports ORDER BY created_at DESC LIMIT ? OFFSET ?'
   ).all(limit, offset) as IssueReport[];
   return { reports, total };
+}
+
+export function saveGameEvent(event: GameEvent): void {
+  db.prepare(`
+    INSERT INTO game_events (game_id, room_id, event_type, actor_session_id, actor_name, phase, round, data_json, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    event.game_id ?? null,
+    event.room_id,
+    event.event_type,
+    event.actor_session_id ?? null,
+    event.actor_name ?? null,
+    event.phase ?? null,
+    event.round ?? null,
+    event.data_json ?? null,
+    event.created_at
+  );
+}
+
+export function backfillGameId(roomId: string, gameId: string): void {
+  db.prepare(`UPDATE game_events SET game_id = ? WHERE room_id = ? AND game_id IS NULL`).run(gameId, roomId);
+}
+
+export function getGameEvents(gameId: string): GameEventRow[] {
+  return db.prepare(`
+    SELECT id, game_id, room_id, event_type, actor_session_id, actor_name, phase, round, data_json, created_at
+    FROM game_events WHERE game_id = ? ORDER BY created_at ASC, id ASC
+  `).all(gameId) as GameEventRow[];
+}
+
+export function getGameEventsByRoom(roomId: string): GameEventRow[] {
+  return db.prepare(`
+    SELECT id, game_id, room_id, event_type, actor_session_id, actor_name, phase, round, data_json, created_at
+    FROM game_events WHERE room_id = ? ORDER BY created_at ASC, id ASC
+  `).all(roomId) as GameEventRow[];
 }

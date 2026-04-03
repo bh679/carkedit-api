@@ -8,8 +8,8 @@ import { handleRevealDie, handleEndDieTurn } from "../phases/DiePhase.js";
 import { handleSubmitCard, handleRevealSubmission, handleEndConvinceTurn, handleSelectWinner, handleNextRound } from "../phases/LivingPhase.js";
 import { handleStartEulogyRound, handleSelectEulogist, handleConfirmEulogists, handleDoneEulogy, handlePickBestEulogy, handleNextWildcard, handleRevealWinner } from "../phases/EulogyPhase.js";
 import { ROOM_CODE_WORDS } from "./roomWords.js";
-import { saveGameResult, saveCardPlays } from "../db/database.js";
-import type { GameResult, CardPlay } from "../db/types.js";
+import { saveGameResult, saveCardPlays, saveGameEvent, backfillGameId } from "../db/database.js";
+import type { GameResult, CardPlay, GameEvent } from "../db/types.js";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -18,6 +18,12 @@ const __dirnameGR = path.dirname(fileURLToPath(import.meta.url));
 const apiPkg = JSON.parse(fs.readFileSync(path.join(__dirnameGR, "../../package.json"), "utf-8"));
 
 const MIN_PLAYERS = 2;
+
+// Dev/test player names — games where all players match are flagged as dev games
+const DEV_NAME_SET = new Set([
+  'Brennan', 'Simon', 'Leonie', 'Danikah', 'Lowe',
+  'Hatton', 'Sanderson', 'Will', 'Rae', 'Roy',
+]);
 
 function generateRoomCode(): string {
   return ROOM_CODE_WORDS[Math.floor(Math.random() * ROOM_CODE_WORDS.length)];
@@ -28,15 +34,25 @@ export class GameRoom extends Room<{ state: GameState }> {
   private _gameResultSaved = false;
   private _gameStartedAt: string | null = null;
   private _cardPlays: CardPlay[] = [];
+  private _previousPhase: string = "lobby";
+  private _gameId: string | null = null;
 
   async onCreate(options: any) {
     this.setState(new GameState());
 
-    // Poll for game completion to persist results
+    // Poll for game completion and phase changes
     this.clock.setInterval(() => {
       if (this.state.phase === "winner" && !this._gameResultSaved) {
         this._gameResultSaved = true;
         this.persistGameResults();
+      }
+      // Track phase changes
+      if (this.state.phase !== this._previousPhase) {
+        this.logEvent(undefined, "phase_changed", {
+          from: this._previousPhase,
+          to: this.state.phase,
+        });
+        this._previousPhase = this.state.phase;
       }
     }, 1000);
 
@@ -48,6 +64,11 @@ export class GameRoom extends Room<{ state: GameState }> {
       await this.setMetadata({ roomCode });
     }
 
+    this.logEvent(undefined, "room_created", {
+      isPrivate: this.state.isPrivate,
+      roomCode: this.state.roomCode || null,
+    });
+
     this.onMessage("ready", (client) => {
       this.handleReady(client);
     });
@@ -55,31 +76,50 @@ export class GameRoom extends Room<{ state: GameState }> {
     this.onMessage("set_name", (client, data: { name: string }) => {
       const player = this.state.players.get(client.sessionId);
       if (player) {
+        const oldName = player.name;
         player.name = data.name;
+        this.logEvent(client, "name_changed", { oldName, newName: data.name });
       }
     });
 
     this.onMessage("reveal_die", (client) => {
+      const player = this.state.players.get(client.sessionId);
+      const card = player?.hand?.[0];
+      this.logEvent(client, "die_revealed", {
+        cardId: card?.id,
+        cardText: card?.text,
+      });
       handleRevealDie(this.state, client);
     });
 
     this.onMessage("end_die_turn", (client) => {
+      this.logEvent(client, "die_turn_ended");
       handleEndDieTurn(this.state, client);
     });
 
     this.onMessage("submit_card", (client, data: { cardIndex: number }) => {
+      this.logEvent(client, "card_submitted", { cardIndex: data.cardIndex });
       handleSubmitCard(this.state, client, data.cardIndex);
     });
 
     this.onMessage("reveal_submission", (client) => {
+      this.logEvent(client, "submission_revealed");
       handleRevealSubmission(this.state, client);
     });
 
     this.onMessage("end_convince_turn", (client) => {
+      this.logEvent(client, "convince_turn_ended");
       handleEndConvinceTurn(this.state, client);
     });
 
     this.onMessage("select_winner", (client, data: { cardIndex: number }) => {
+      const winnerCard = this.state.submittedCards[data.cardIndex];
+      const winnerPlayer = winnerCard?.submittedBy ? this.state.players.get(winnerCard.submittedBy) : null;
+      this.logEvent(client, "winner_selected", {
+        cardIndex: data.cardIndex,
+        winnerName: winnerPlayer?.name,
+        winnerSessionId: winnerCard?.submittedBy,
+      });
       // Capture card plays before handleSelectWinner processes them
       this.captureCardPlays(data.cardIndex);
       handleSelectWinner(this.state, client, data.cardIndex);
@@ -96,6 +136,7 @@ export class GameRoom extends Room<{ state: GameState }> {
       // Only the host (room creator) can change settings during lobby
       if (this.state.hostId && this.state.hostId !== client.sessionId) return;
       if (this.state.phase !== "lobby") return;
+      this.logEvent(client, "setting_changed", { key: data.key, value: data.value });
       this.applySetting(data.key, data.value);
     });
 
@@ -103,6 +144,7 @@ export class GameRoom extends Room<{ state: GameState }> {
       // Bulk update — used for game mode presets
       if (this.state.hostId && this.state.hostId !== client.sessionId) return;
       if (this.state.phase !== "lobby") return;
+      this.logEvent(client, "settings_bulk_changed", { settings: data });
       for (const [key, value] of Object.entries(data)) {
         this.applySetting(key, value);
       }
@@ -110,22 +152,39 @@ export class GameRoom extends Room<{ state: GameState }> {
 
     // Eulogy (Phase 4) message handlers
     this.onMessage("start_eulogy_round", (client) => {
+      this.logEvent(client, "eulogy_round_started");
       handleStartEulogyRound(this.state, client);
     });
 
     this.onMessage("select_eulogist", (client, data: { sessionId: string }) => {
+      const eulogist = this.state.players.get(data.sessionId);
+      this.logEvent(client, "eulogist_selected", {
+        sessionId: data.sessionId,
+        eulogistName: eulogist?.name,
+      });
       handleSelectEulogist(this.state, client, data.sessionId);
     });
 
     this.onMessage("confirm_eulogists", (client) => {
+      const eulogists = Array.from(this.state.selectedEulogists).map(sid => {
+        const p = this.state.players.get(sid);
+        return { sessionId: sid, name: p?.name };
+      });
+      this.logEvent(client, "eulogists_confirmed", { eulogists });
       handleConfirmEulogists(this.state, client);
     });
 
     this.onMessage("done_eulogy", (client) => {
+      this.logEvent(client, "eulogy_done");
       handleDoneEulogy(this.state, client);
     });
 
     this.onMessage("pick_best_eulogy", (client, data: { sessionId: string }) => {
+      const bestPlayer = this.state.players.get(data.sessionId);
+      this.logEvent(client, "best_eulogy_picked", {
+        sessionId: data.sessionId,
+        bestEulogistName: bestPlayer?.name,
+      });
       handlePickBestEulogy(this.state, client, data.sessionId);
       // Auto-advance after points phase (shorter for 1-round games)
       if (this.state.phase === "eulogy_points") {
@@ -137,6 +196,7 @@ export class GameRoom extends Room<{ state: GameState }> {
     });
 
     this.onMessage("reveal_winner", (client) => {
+      this.logEvent(client, "winner_revealed");
       handleRevealWinner(this.state, client);
     });
 
@@ -145,6 +205,7 @@ export class GameRoom extends Room<{ state: GameState }> {
       if (this.state.players.size < MIN_PLAYERS) return;
       // Only the host (room creator) can start the game
       if (this.state.hostId && this.state.hostId !== client.sessionId) return;
+      this.logEvent(client, "game_start_requested");
       this.startGame();
     });
 
@@ -163,6 +224,7 @@ export class GameRoom extends Room<{ state: GameState }> {
     player.birthDay = (day >= 1 && day <= 31) ? day : 0;
     this.state.players.set(client.sessionId, player);
 
+    const isHost = !this.state.hostId;
     // First player to join becomes the host
     if (!this.state.hostId) {
       this.state.hostId = client.sessionId;
@@ -172,6 +234,14 @@ export class GameRoom extends Room<{ state: GameState }> {
     const newOrder = computeDodTurnOrder(this.state.players);
     this.state.turnOrder.splice(0, this.state.turnOrder.length);
     newOrder.forEach((id) => this.state.turnOrder.push(id));
+
+    this.logEvent(client, "player_joined", {
+      name: player.name,
+      birthMonth: player.birthMonth,
+      birthDay: player.birthDay,
+      isHost,
+      playerCount: this.state.players.size,
+    });
 
     console.log(`[GameRoom] ${player.name} joined (${client.sessionId})`);
   }
@@ -183,6 +253,11 @@ export class GameRoom extends Room<{ state: GameState }> {
     console.log(`[GameRoom] ${player.name} left`);
     player.connected = false;
 
+    this.logEvent(client, "player_left", {
+      name: player.name,
+      phase: this.state.phase,
+    });
+
     if (this.state.phase === "lobby") {
       this.state.players.delete(client.sessionId);
       return;
@@ -192,14 +267,17 @@ export class GameRoom extends Room<{ state: GameState }> {
     try {
       await this.allowReconnection(client, 120);
       player.connected = true;
+      this.logEvent(client, "player_reconnected", { name: player.name });
       console.log(`[GameRoom] ${player.name} reconnected`);
     } catch {
+      this.logEvent(client, "player_reconnect_timeout", { name: player.name });
       console.log(`[GameRoom] ${player.name} reconnection timed out`);
       // Player stays in game state as disconnected — don't remove during active game
     }
   }
 
   onDispose() {
+    this.logEvent(undefined, "room_disposed");
     console.log(`[GameRoom] Room disposed`);
   }
 
@@ -246,6 +324,7 @@ export class GameRoom extends Room<{ state: GameState }> {
     if (!player) return;
 
     player.ready = !player.ready;
+    this.logEvent(client, "player_ready", { ready: player.ready });
 
     const allReady = this.checkAllReady();
     if (allReady && this.state.autoStartOnReady && this.state.players.size >= MIN_PLAYERS) {
@@ -305,7 +384,7 @@ export class GameRoom extends Room<{ state: GameState }> {
         status: "finished",
         live_status: "completed",
         has_error: false,
-        is_dev: false,
+        is_dev: sorted.length > 0 && sorted.every((p) => DEV_NAME_SET.has(p.name)),
         api_version: apiPkg.version,
         settings_json: JSON.stringify(settings),
         players: sorted.map((p, i) => ({
@@ -316,7 +395,11 @@ export class GameRoom extends Room<{ state: GameState }> {
       };
 
       const id = saveGameResult(result);
+      this._gameId = id;
       console.log(`[GameRoom] Game result saved: ${id}`);
+
+      // Backfill game_id on all events collected during this room's lifetime
+      backfillGameId(this.roomId, id);
 
       // Save accumulated card plays with the game ID
       if (this._cardPlays.length > 0) {
@@ -324,6 +407,13 @@ export class GameRoom extends Room<{ state: GameState }> {
         saveCardPlays(plays);
         console.log(`[GameRoom] ${plays.length} card plays saved`);
       }
+
+      this.logEvent(undefined, "game_finished", {
+        winnerName: sorted[0]?.name,
+        winnerScore: sorted[0]?.score,
+        durationSeconds,
+        playerCount: sorted.length,
+      });
     } catch (err) {
       console.error("[GameRoom] Failed to save game result:", err);
     }
@@ -356,6 +446,7 @@ export class GameRoom extends Room<{ state: GameState }> {
   private startGame() {
     console.log(`[GameRoom] Game starting — creating decks`);
     this._gameStartedAt = new Date().toISOString();
+    this._previousPhase = "lobby"; // ensure phase_changed fires for die_phase
 
     const shuffledDieDeck = shuffle(createDeck(DIE_CARDS, "die"));
     const shuffledLivingDeck = shuffle(createDeck(LIVING_CARDS, "living"));
@@ -385,6 +476,42 @@ export class GameRoom extends Room<{ state: GameState }> {
     this.state.round = 1;
     this.state.phase = "die_phase";
 
+    const playerNames: string[] = [];
+    this.state.players.forEach(p => playerNames.push(p.name));
+    this.logEvent(undefined, "game_started", {
+      playerCount: this.state.players.size,
+      turnOrder: finalOrder,
+      playerNames,
+      settings: {
+        rounds: this.state.rounds,
+        handSize: this.state.handSize,
+        enableDie: this.state.enableDie,
+        enableLive: this.state.enableLive,
+        enableBye: this.state.enableBye,
+        enableEulogy: this.state.enableEulogy,
+      },
+    });
+
     console.log(`[GameRoom] Phase: die_phase — ${this.state.currentTurn}'s turn`);
+  }
+
+  private logEvent(client: Client | undefined, eventType: string, data?: Record<string, any>) {
+    try {
+      const player = client ? this.state.players.get(client.sessionId) : null;
+      const event: GameEvent = {
+        room_id: this.roomId,
+        game_id: this._gameId || undefined,
+        event_type: eventType,
+        actor_session_id: client?.sessionId,
+        actor_name: player?.name,
+        phase: this.state.phase,
+        round: this.state.round || undefined,
+        data_json: data ? JSON.stringify(data) : undefined,
+        created_at: new Date().toISOString(),
+      };
+      saveGameEvent(event);
+    } catch (err) {
+      console.error(`[GameRoom] Failed to log event ${eventType}:`, err);
+    }
   }
 }

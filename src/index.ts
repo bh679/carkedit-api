@@ -4,7 +4,7 @@ import { fileURLToPath } from "url";
 import express from "express";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
-import { initDatabase, saveGameResult, getRecentGames, getGameById, getStats, getCardStats, saveIssueReport, getIssueReports } from "./db/database.js";
+import { initDatabase, saveGameResult, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports } from "./db/database.js";
 import type { GameResult, IssueReport } from "./db/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -51,7 +51,7 @@ const server = defineServer({
     // Game history endpoints
     app.post("/api/carkedit/games", (req: any, res: any) => {
       try {
-        const { mode, rounds, players, settings, finishedAt, startedAt, hostName, status, clientVersion } = req.body;
+        const { mode, rounds, players, settings, finishedAt, startedAt, hostName, status, clientVersion, isDev } = req.body;
         if (!players || !Array.isArray(players) || players.length === 0) {
           return res.status(400).json({ error: "players array is required" });
         }
@@ -76,7 +76,7 @@ const server = defineServer({
           status: status || "finished",
           live_status: "completed",
           has_error: false,
-          is_dev: false,
+          is_dev: isDev || false,
           api_version: pkg.version,
           client_version: clientVersion,
           settings_json: settings ? JSON.stringify(settings) : undefined,
@@ -97,10 +97,24 @@ const server = defineServer({
 
     app.get("/api/carkedit/games/stats", (_req: any, res: any) => {
       try {
-        res.json(getStats());
+        const since = _req.query.since as string | undefined;
+        res.json(since ? getStatsByPeriod(since) : getStats());
       } catch (err) {
         console.error("[CarkedIt API] Get stats error:", err);
         res.status(500).json({ error: "Failed to retrieve stats" });
+      }
+    });
+
+    app.get("/api/carkedit/games/stats/live", async (_req: any, res: any) => {
+      try {
+        const rooms = await matchMaker.query({ name: "game" });
+        const activeRooms = rooms.filter((r: any) => r.clients > 0);
+        const activeGames = activeRooms.length;
+        const activePlayers = activeRooms.reduce((sum: number, r: any) => sum + (r.clients || 0), 0);
+        res.json({ activeGames, activePlayers });
+      } catch (err) {
+        console.error("[CarkedIt API] Get live stats error:", err);
+        res.status(500).json({ error: "Failed to retrieve live stats" });
       }
     });
 
@@ -139,6 +153,16 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Get game error:", err);
         res.status(500).json({ error: "Failed to retrieve game" });
+      }
+    });
+
+    app.get("/api/carkedit/games/:id/events", (req: any, res: any) => {
+      try {
+        const events = getGameEvents(req.params.id);
+        res.json({ game_id: req.params.id, events, total: events.length });
+      } catch (err) {
+        console.error("[CarkedIt API] Get game events error:", err);
+        res.status(500).json({ error: "Failed to retrieve game events" });
       }
     });
 
