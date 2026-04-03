@@ -50,8 +50,19 @@ export interface GameSummary {
   players: GamePlayerResult[];
 }
 
+export interface GameDetailCardPlay {
+  round: number;
+  phase: string;
+  card_id: string;
+  card_text: string;
+  card_deck: string;
+  player_name: string;
+  is_winner: number;
+}
+
 export interface GameDetail extends GameSummary {
   settings_json: string | null;
+  card_plays: GameDetailCardPlay[];
 }
 
 export interface CardPlay {

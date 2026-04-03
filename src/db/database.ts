@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import type { GameResult, GameSummary, GameDetail, GamePlayerResult, CardPlay, CardStat } from './types.js';
+import type { GameResult, GameSummary, GameDetail, GameDetailCardPlay, GamePlayerResult, CardPlay, CardStat } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.resolve(__dirname, '../../data/games.db');
@@ -145,6 +145,11 @@ export function getGameById(id: string): GameDetail | null {
   game.players = db.prepare(`
     SELECT player_name, score, rank FROM game_players WHERE game_id = ? ORDER BY rank ASC
   `).all(id) as GamePlayerResult[];
+
+  game.card_plays = db.prepare(`
+    SELECT round, phase, card_id, card_text, card_deck, player_name, is_winner
+    FROM card_plays WHERE game_id = ? ORDER BY round ASC, is_winner DESC
+  `).all(id) as GameDetailCardPlay[];
 
   return game;
 }
