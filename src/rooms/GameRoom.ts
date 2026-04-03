@@ -10,6 +10,12 @@ import { handleStartEulogyRound, handleSelectEulogist, handleConfirmEulogists, h
 import { ROOM_CODE_WORDS } from "./roomWords.js";
 import { saveGameResult } from "../db/database.js";
 import type { GameResult } from "../db/types.js";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirnameGR = path.dirname(fileURLToPath(import.meta.url));
+const apiPkg = JSON.parse(fs.readFileSync(path.join(__dirnameGR, "../../package.json"), "utf-8"));
 
 const MIN_PLAYERS = 2;
 
@@ -278,16 +284,26 @@ export class GameRoom extends Room<{ state: GameState }> {
         settings[key] = (this.state as any)[key];
       }
 
+      // Get host name
+      const hostPlayer = this.state.hostId ? this.state.players.get(this.state.hostId) : null;
+
       const result: GameResult = {
         id: crypto.randomUUID(),
+        started_at: this._gameStartedAt || undefined,
         finished_at: now,
         mode: "online",
         room_code: this.state.roomCode || undefined,
+        host_name: hostPlayer?.name || undefined,
         rounds: this.state.rounds,
         player_count: sorted.length,
         winner_name: sorted[0]?.name || "Unknown",
         winner_score: sorted[0]?.score || 0,
         duration_seconds: durationSeconds,
+        status: "finished",
+        live_status: "completed",
+        has_error: false,
+        is_dev: false,
+        api_version: apiPkg.version,
         settings_json: JSON.stringify(settings),
         players: sorted.map((p, i) => ({
           player_name: p.name,

@@ -16,14 +16,22 @@ export function initDatabase(): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS games (
       id TEXT PRIMARY KEY,
+      started_at TEXT,
       finished_at TEXT NOT NULL,
       mode TEXT NOT NULL,
       room_code TEXT,
+      host_name TEXT,
       rounds INTEGER NOT NULL,
       player_count INTEGER NOT NULL,
       winner_name TEXT NOT NULL,
       winner_score INTEGER NOT NULL,
       duration_seconds INTEGER,
+      status TEXT NOT NULL DEFAULT 'finished',
+      live_status TEXT NOT NULL DEFAULT 'completed',
+      has_error INTEGER NOT NULL DEFAULT 0,
+      is_dev INTEGER NOT NULL DEFAULT 0,
+      api_version TEXT,
+      client_version TEXT,
       settings_json TEXT
     );
 
@@ -38,12 +46,32 @@ export function initDatabase(): void {
     CREATE INDEX IF NOT EXISTS idx_game_players_game_id ON game_players(game_id);
     CREATE INDEX IF NOT EXISTS idx_games_finished_at ON games(finished_at);
   `);
+
+  // Migrate: add new columns if they don't exist (for existing DBs)
+  const cols = db.prepare("PRAGMA table_info(games)").all().map((c: any) => c.name);
+  const migrations: [string, string][] = [
+    ['started_at', 'ALTER TABLE games ADD COLUMN started_at TEXT'],
+    ['host_name', 'ALTER TABLE games ADD COLUMN host_name TEXT'],
+    ['status', "ALTER TABLE games ADD COLUMN status TEXT NOT NULL DEFAULT 'finished'"],
+    ['live_status', "ALTER TABLE games ADD COLUMN live_status TEXT NOT NULL DEFAULT 'completed'"],
+    ['has_error', 'ALTER TABLE games ADD COLUMN has_error INTEGER NOT NULL DEFAULT 0'],
+    ['is_dev', 'ALTER TABLE games ADD COLUMN is_dev INTEGER NOT NULL DEFAULT 0'],
+    ['api_version', 'ALTER TABLE games ADD COLUMN api_version TEXT'],
+    ['client_version', 'ALTER TABLE games ADD COLUMN client_version TEXT'],
+  ];
+  for (const [col, sql] of migrations) {
+    if (!cols.includes(col)) {
+      db.exec(sql);
+    }
+  }
 }
 
 export function saveGameResult(result: GameResult): string {
   const insertGame = db.prepare(`
-    INSERT INTO games (id, finished_at, mode, room_code, rounds, player_count, winner_name, winner_score, duration_seconds, settings_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO games (id, started_at, finished_at, mode, room_code, host_name, rounds, player_count,
+      winner_name, winner_score, duration_seconds, status, live_status, has_error, is_dev,
+      api_version, client_version, settings_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertPlayer = db.prepare(`
@@ -53,9 +81,11 @@ export function saveGameResult(result: GameResult): string {
 
   const transaction = db.transaction((r: GameResult) => {
     insertGame.run(
-      r.id, r.finished_at, r.mode, r.room_code ?? null,
-      r.rounds, r.player_count, r.winner_name, r.winner_score,
-      r.duration_seconds ?? null, r.settings_json ?? null
+      r.id, r.started_at ?? null, r.finished_at, r.mode, r.room_code ?? null,
+      r.host_name ?? null, r.rounds, r.player_count, r.winner_name, r.winner_score,
+      r.duration_seconds ?? null, r.status, r.live_status,
+      r.has_error ? 1 : 0, r.is_dev ? 1 : 0,
+      r.api_version ?? null, r.client_version ?? null, r.settings_json ?? null
     );
     for (const p of r.players) {
       insertPlayer.run(r.id, p.player_name, p.score, p.rank);
@@ -70,7 +100,9 @@ export function getRecentGames(limit = 20, offset = 0): { games: GameSummary[]; 
   const total = (db.prepare('SELECT COUNT(*) as count FROM games').get() as { count: number }).count;
 
   const games = db.prepare(`
-    SELECT id, finished_at, mode, room_code, rounds, player_count, winner_name, winner_score, duration_seconds
+    SELECT id, started_at, finished_at, mode, room_code, host_name, rounds, player_count,
+      winner_name, winner_score, duration_seconds, status, live_status, has_error, is_dev,
+      api_version, client_version
     FROM games ORDER BY finished_at DESC LIMIT ? OFFSET ?
   `).all(limit, offset) as GameSummary[];
 
@@ -87,7 +119,9 @@ export function getRecentGames(limit = 20, offset = 0): { games: GameSummary[]; 
 
 export function getGameById(id: string): GameDetail | null {
   const game = db.prepare(`
-    SELECT id, finished_at, mode, room_code, rounds, player_count, winner_name, winner_score, duration_seconds, settings_json
+    SELECT id, started_at, finished_at, mode, room_code, host_name, rounds, player_count,
+      winner_name, winner_score, duration_seconds, status, live_status, has_error, is_dev,
+      api_version, client_version, settings_json
     FROM games WHERE id = ?
   `).get(id) as GameDetail | undefined;
 
@@ -98,4 +132,23 @@ export function getGameById(id: string): GameDetail | null {
   `).all(id) as GamePlayerResult[];
 
   return game;
+}
+
+export function getStats(): { totalGames: number; totalPlayers: number; totalPlayTime: number; avgPlayTime: number; medianPlayTime: number; longestPlayTime: number } {
+  const totalGames = (db.prepare("SELECT COUNT(*) as c FROM games WHERE status = 'finished'").get() as any).c;
+  const totalPlayers = (db.prepare("SELECT COALESCE(SUM(player_count), 0) as c FROM games WHERE status = 'finished'").get() as any).c;
+  const totalPlayTime = (db.prepare("SELECT COALESCE(SUM(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL").get() as any).c;
+  const avgPlayTime = (db.prepare("SELECT COALESCE(AVG(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL").get() as any).c;
+
+  // Median
+  const durations = db.prepare("SELECT duration_seconds FROM games WHERE duration_seconds IS NOT NULL ORDER BY duration_seconds").all().map((r: any) => r.duration_seconds);
+  let medianPlayTime = 0;
+  if (durations.length > 0) {
+    const mid = Math.floor(durations.length / 2);
+    medianPlayTime = durations.length % 2 === 0 ? (durations[mid - 1] + durations[mid]) / 2 : durations[mid];
+  }
+
+  const longestPlayTime = (db.prepare("SELECT COALESCE(MAX(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL").get() as any).c;
+
+  return { totalGames, totalPlayers, totalPlayTime, avgPlayTime: Math.round(avgPlayTime), medianPlayTime: Math.round(medianPlayTime), longestPlayTime };
 }

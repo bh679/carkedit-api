@@ -4,7 +4,7 @@ import { fileURLToPath } from "url";
 import express from "express";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
-import { initDatabase, saveGameResult, getRecentGames, getGameById } from "./db/database.js";
+import { initDatabase, saveGameResult, getRecentGames, getGameById, getStats } from "./db/database.js";
 import type { GameResult } from "./db/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -51,7 +51,7 @@ const server = defineServer({
     // Game history endpoints
     app.post("/api/carkedit/games", (req: any, res: any) => {
       try {
-        const { mode, rounds, players, settings, finishedAt } = req.body;
+        const { mode, rounds, players, settings, finishedAt, startedAt, hostName, status, clientVersion } = req.body;
         if (!players || !Array.isArray(players) || players.length === 0) {
           return res.status(400).json({ error: "players array is required" });
         }
@@ -59,15 +59,26 @@ const server = defineServer({
           return res.status(400).json({ error: "rounds must be >= 1" });
         }
 
+        const pkgPath = path.join(__dirname, "../package.json");
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+
         const sorted = [...players].sort((a: any, b: any) => b.score - a.score);
         const result: GameResult = {
           id: crypto.randomUUID(),
+          started_at: startedAt,
           finished_at: finishedAt || new Date().toISOString(),
           mode: mode || "local",
+          host_name: hostName,
           rounds,
           player_count: players.length,
           winner_name: sorted[0].name,
           winner_score: sorted[0].score,
+          status: status || "finished",
+          live_status: "completed",
+          has_error: false,
+          is_dev: false,
+          api_version: pkg.version,
+          client_version: clientVersion,
           settings_json: settings ? JSON.stringify(settings) : undefined,
           players: sorted.map((p: any, i: number) => ({
             player_name: p.name,
@@ -81,6 +92,15 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Save game error:", err);
         res.status(500).json({ error: "Failed to save game" });
+      }
+    });
+
+    app.get("/api/carkedit/games/stats", (_req: any, res: any) => {
+      try {
+        res.json(getStats());
+      } catch (err) {
+        console.error("[CarkedIt API] Get stats error:", err);
+        res.status(500).json({ error: "Failed to retrieve stats" });
       }
     });
 
