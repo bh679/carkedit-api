@@ -71,11 +71,18 @@ export class GameRoom extends Room<{ state: GameState }> {
     });
 
     this.onMessage("setting", (client, data: { key: string; value: any }) => {
-      // Only the host (room creator) can change settings
+      // Only the host (room creator) can change settings during lobby
       if (this.state.hostId && this.state.hostId !== client.sessionId) return;
       if (this.state.phase !== "lobby") return;
-      if (data.key === "autoStartOnReady" && typeof data.value === "boolean") {
-        this.state.autoStartOnReady = data.value;
+      this.applySetting(data.key, data.value);
+    });
+
+    this.onMessage("game_settings", (client, data: Record<string, any>) => {
+      // Bulk update — used for game mode presets
+      if (this.state.hostId && this.state.hostId !== client.sessionId) return;
+      if (this.state.phase !== "lobby") return;
+      for (const [key, value] of Object.entries(data)) {
+        this.applySetting(key, value);
       }
     });
 
@@ -160,6 +167,42 @@ export class GameRoom extends Room<{ state: GameState }> {
 
   onDispose() {
     console.log(`[GameRoom] Room disposed`);
+  }
+
+  private applySetting(key: string, value: any) {
+    // Boolean settings
+    const boolKeys = [
+      "autoStartOnReady", "enableDie", "enableLive", "enableBye", "enableEulogy",
+      "forceWildcards", "playableWildcards", "optionalCardPlay", "ultraQuickMode",
+      "timerEnabled", "pitchTimerEnabled", "playCardTimerEnabled",
+      "timerCountUp", "timerVisible", "timerAutoAdvance",
+    ];
+    if (boolKeys.includes(key) && typeof value === "boolean") {
+      (this.state as any)[key] = value;
+      return;
+    }
+
+    // Numeric settings with ranges
+    const numRanges: Record<string, [number, number]> = {
+      rounds: [1, 10],
+      handSize: [1, 68],
+      wildcardCount: [0, 10],
+      eulogistCount: [1, 10],
+      pitchDuration: [30, 3600],
+    };
+    if (key in numRanges && typeof value === "number") {
+      const [min, max] = numRanges[key];
+      (this.state as any)[key] = Math.max(min, Math.min(max, Math.floor(value)));
+      return;
+    }
+
+    // String settings with allowed values
+    if (key === "handRedraws") {
+      const allowed = ["off", "once_per_phase", "once_per_round", "unlimited"];
+      if (typeof value === "string" && allowed.includes(value)) {
+        this.state.handRedraws = value;
+      }
+    }
   }
 
   private handleReady(client: Client) {

@@ -30,6 +30,28 @@ export class GameState extends Schema {
   @type([Card]) submittedCards = new ArraySchema<Card>();
   @type(["string"]) turnOrder = new ArraySchema<string>();
 
+  // Game settings (synced to all clients, host-editable during lobby)
+  @type("number") rounds: number = 2;
+  @type("number") handSize: number = 5;
+  @type("boolean") enableDie: boolean = true;
+  @type("boolean") enableLive: boolean = true;
+  @type("boolean") enableBye: boolean = true;
+  @type("boolean") enableEulogy: boolean = true;
+  @type("boolean") forceWildcards: boolean = false;
+  @type("boolean") playableWildcards: boolean = true;
+  @type("number") wildcardCount: number = 2;
+  @type("number") eulogistCount: number = 2;
+  @type("string") handRedraws: string = "once_per_phase";
+  @type("boolean") timerEnabled: boolean = false;
+  @type("boolean") pitchTimerEnabled: boolean = true;
+  @type("boolean") playCardTimerEnabled: boolean = true;
+  @type("boolean") timerCountUp: boolean = false;
+  @type("number") pitchDuration: number = 120;
+  @type("boolean") timerVisible: boolean = true;
+  @type("boolean") timerAutoAdvance: boolean = true;
+  @type("boolean") ultraQuickMode: boolean = false;
+  @type("boolean") optionalCardPlay: boolean = false;
+
   // Eulogy (Phase 4) state
   @type("string") currentWildcardPlayer: string = "";
   @type("number") currentWildcardIndex: number = 0;
