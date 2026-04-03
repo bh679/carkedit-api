@@ -4,7 +4,7 @@ import { fileURLToPath } from "url";
 import express from "express";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
-import { initDatabase, saveGameResult, getRecentGames, getGameById, getStats, getCardStats, getGameEvents } from "./db/database.js";
+import { initDatabase, saveGameResult, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents } from "./db/database.js";
 import type { GameResult } from "./db/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -97,10 +97,24 @@ const server = defineServer({
 
     app.get("/api/carkedit/games/stats", (_req: any, res: any) => {
       try {
-        res.json(getStats());
+        const since = _req.query.since as string | undefined;
+        res.json(since ? getStatsByPeriod(since) : getStats());
       } catch (err) {
         console.error("[CarkedIt API] Get stats error:", err);
         res.status(500).json({ error: "Failed to retrieve stats" });
+      }
+    });
+
+    app.get("/api/carkedit/games/stats/live", async (_req: any, res: any) => {
+      try {
+        const rooms = await matchMaker.query({ name: "game" });
+        const activeRooms = rooms.filter((r: any) => r.clients > 0);
+        const activeGames = activeRooms.length;
+        const activePlayers = activeRooms.reduce((sum: number, r: any) => sum + (r.clients || 0), 0);
+        res.json({ activeGames, activePlayers });
+      } catch (err) {
+        console.error("[CarkedIt API] Get live stats error:", err);
+        res.status(500).json({ error: "Failed to retrieve live stats" });
       }
     });
 
