@@ -8,6 +8,8 @@ import { handleRevealDie, handleEndDieTurn } from "../phases/DiePhase.js";
 import { handleSubmitCard, handleRevealSubmission, handleEndConvinceTurn, handleSelectWinner, handleNextRound } from "../phases/LivingPhase.js";
 import { handleStartEulogyRound, handleSelectEulogist, handleConfirmEulogists, handleDoneEulogy, handlePickBestEulogy, handleNextWildcard, handleRevealWinner } from "../phases/EulogyPhase.js";
 import { ROOM_CODE_WORDS } from "./roomWords.js";
+import { saveGameResult } from "../db/database.js";
+import type { GameResult } from "../db/types.js";
 
 const MIN_PLAYERS = 2;
 
@@ -17,9 +19,19 @@ function generateRoomCode(): string {
 
 export class GameRoom extends Room<{ state: GameState }> {
   maxClients = 10;
+  private _gameResultSaved = false;
+  private _gameStartedAt: string | null = null;
 
   async onCreate(options: any) {
     this.setState(new GameState());
+
+    // Poll for game completion to persist results
+    this.clock.setInterval(() => {
+      if (this.state.phase === "winner" && !this._gameResultSaved) {
+        this._gameResultSaved = true;
+        this.persistGameResults();
+      }
+    }, 1000);
 
     if (options.private) {
       const roomCode = generateRoomCode();
@@ -240,8 +252,60 @@ export class GameRoom extends Room<{ state: GameState }> {
     return allReady;
   }
 
+  private persistGameResults() {
+    try {
+      const players: { name: string; score: number }[] = [];
+      this.state.players.forEach((player) => {
+        players.push({ name: player.name, score: player.score });
+      });
+
+      const sorted = [...players].sort((a, b) => b.score - a.score);
+      const now = new Date().toISOString();
+      let durationSeconds: number | undefined;
+      if (this._gameStartedAt) {
+        durationSeconds = Math.round(
+          (Date.now() - new Date(this._gameStartedAt).getTime()) / 1000
+        );
+      }
+
+      const settings: Record<string, any> = {};
+      const settingKeys = [
+        "rounds", "handSize", "enableDie", "enableLive", "enableBye", "enableEulogy",
+        "forceWildcards", "playableWildcards", "wildcardCount", "eulogistCount",
+        "optionalCardPlay", "ultraQuickMode", "timerEnabled", "pitchDuration",
+      ];
+      for (const key of settingKeys) {
+        settings[key] = (this.state as any)[key];
+      }
+
+      const result: GameResult = {
+        id: crypto.randomUUID(),
+        finished_at: now,
+        mode: "online",
+        room_code: this.state.roomCode || undefined,
+        rounds: this.state.rounds,
+        player_count: sorted.length,
+        winner_name: sorted[0]?.name || "Unknown",
+        winner_score: sorted[0]?.score || 0,
+        duration_seconds: durationSeconds,
+        settings_json: JSON.stringify(settings),
+        players: sorted.map((p, i) => ({
+          player_name: p.name,
+          score: p.score,
+          rank: i + 1,
+        })),
+      };
+
+      const id = saveGameResult(result);
+      console.log(`[GameRoom] Game result saved: ${id}`);
+    } catch (err) {
+      console.error("[GameRoom] Failed to save game result:", err);
+    }
+  }
+
   private startGame() {
     console.log(`[GameRoom] Game starting — creating decks`);
+    this._gameStartedAt = new Date().toISOString();
 
     const shuffledDieDeck = shuffle(createDeck(DIE_CARDS, "die"));
     const shuffledLivingDeck = shuffle(createDeck(LIVING_CARDS, "living"));

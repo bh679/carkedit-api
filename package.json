@@ -13,17 +13,29 @@
   "jest": {
     "preset": "ts-jest/presets/default-esm",
     "testEnvironment": "node",
-    "extensionsToTreatAsEsm": [".ts"],
+    "extensionsToTreatAsEsm": [
+      ".ts"
+    ],
     "moduleNameMapper": {
       "^(\\.{1,2}/.*)\\.js$": "$1"
     },
-    "testPathIgnorePatterns": ["/node_modules/", "/dist/"],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/dist/"
+    ],
     "transform": {
-      "^.+\\.ts$": ["ts-jest", { "useESM": true }]
+      "^.+\\.ts$": [
+        "ts-jest",
+        {
+          "useESM": true
+        }
+      ]
     }
   },
   "dependencies": {
     "@colyseus/ws-transport": "^0.17.0",
+    "@types/better-sqlite3": "^7.6.8",
+    "better-sqlite3": "^9.6.0",
     "colyseus": "^0.17.0",
     "express": "^4.22.1"
   },
