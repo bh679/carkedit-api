@@ -123,7 +123,8 @@ const server = defineServer({
 
     app.get("/api/carkedit/cards/stats", (_req: any, res: any) => {
       try {
-        res.json(getCardStats());
+        const devFilter = (['all', 'dev', 'nodev'].includes(_req.query.dev) ? _req.query.dev : 'all') as 'all' | 'dev' | 'nodev';
+        res.json(getCardStats(devFilter));
       } catch (err) {
         console.error("[CarkedIt API] Get card stats error:", err);
         res.status(500).json({ error: "Failed to retrieve card stats" });
