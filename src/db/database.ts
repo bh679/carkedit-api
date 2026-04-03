@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import type { GameResult, GameSummary, GameDetail, GameDetailCardPlay, GamePlayerResult, CardPlay, CardStat } from './types.js';
+import type { GameResult, GameSummary, GameDetail, GameDetailCardPlay, GamePlayerResult, CardPlay, CardStat, IssueReport } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.resolve(__dirname, '../../data/games.db');
@@ -60,6 +60,26 @@ export function initDatabase(): void {
 
     CREATE INDEX IF NOT EXISTS idx_card_plays_card_id ON card_plays(card_id, card_deck);
     CREATE INDEX IF NOT EXISTS idx_card_plays_game_id ON card_plays(game_id);
+
+    CREATE TABLE IF NOT EXISTS issue_reports (
+      id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      category TEXT NOT NULL,
+      description TEXT,
+      game_id TEXT,
+      room_code TEXT,
+      game_mode TEXT,
+      screen TEXT,
+      phase TEXT,
+      player_count INTEGER,
+      players_json TEXT,
+      game_state_json TEXT,
+      device_info TEXT,
+      error_log TEXT,
+      client_version TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_issue_reports_created_at ON issue_reports(created_at);
   `);
 
   // Migrate: add new columns if they don't exist (for existing DBs)
@@ -234,4 +254,28 @@ export function getCardStats(): { mostPlayed: CardStat[]; leastPlayed: CardStat[
   const highestWinRate = allCards.filter(c => c.play_count >= 3).sort((a, b) => b.win_rate - a.win_rate).slice(0, 20);
 
   return { mostPlayed, leastPlayed, highestWinRate };
+}
+
+export function saveIssueReport(report: IssueReport): string {
+  db.prepare(`
+    INSERT INTO issue_reports (id, created_at, category, description, game_id, room_code,
+      game_mode, screen, phase, player_count, players_json, game_state_json,
+      device_info, error_log, client_version)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    report.id, report.created_at, report.category, report.description ?? null,
+    report.game_id ?? null, report.room_code ?? null, report.game_mode ?? null,
+    report.screen ?? null, report.phase ?? null, report.player_count ?? null,
+    report.players_json ?? null, report.game_state_json ?? null,
+    report.device_info ?? null, report.error_log ?? null, report.client_version ?? null
+  );
+  return report.id;
+}
+
+export function getIssueReports(limit = 50, offset = 0): { reports: IssueReport[]; total: number } {
+  const total = (db.prepare('SELECT COUNT(*) as count FROM issue_reports').get() as { count: number }).count;
+  const reports = db.prepare(
+    'SELECT * FROM issue_reports ORDER BY created_at DESC LIMIT ? OFFSET ?'
+  ).all(limit, offset) as IssueReport[];
+  return { reports, total };
 }

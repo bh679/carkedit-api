@@ -84,3 +84,21 @@ export interface CardStat {
   win_count: number;
   win_rate: number;
 }
+
+export interface IssueReport {
+  id: string;
+  created_at: string;
+  category: string;
+  description?: string;
+  game_id?: string;
+  room_code?: string;
+  game_mode?: string;
+  screen?: string;
+  phase?: string;
+  player_count?: number;
+  players_json?: string;
+  game_state_json?: string;
+  device_info?: string;
+  error_log?: string;
+  client_version?: string;
+}

@@ -4,8 +4,8 @@ import { fileURLToPath } from "url";
 import express from "express";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
-import { initDatabase, saveGameResult, getRecentGames, getGameById, getStats, getCardStats } from "./db/database.js";
-import type { GameResult } from "./db/types.js";
+import { initDatabase, saveGameResult, getRecentGames, getGameById, getStats, getCardStats, saveIssueReport, getIssueReports } from "./db/database.js";
+import type { GameResult, IssueReport } from "./db/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "4500", 10);
@@ -139,6 +139,53 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Get game error:", err);
         res.status(500).json({ error: "Failed to retrieve game" });
+      }
+    });
+
+    // Issue reporting endpoints
+    app.post("/api/carkedit/issues", (req: any, res: any) => {
+      try {
+        const { category, description, game_mode, screen, phase, room_code,
+                player_count, players_json, game_state_json, device_info,
+                error_log, client_version } = req.body;
+
+        if (!category || typeof category !== 'string' || category.trim().length === 0) {
+          return res.status(400).json({ error: "At least one category is required" });
+        }
+
+        const report: IssueReport = {
+          id: crypto.randomUUID(),
+          created_at: new Date().toISOString(),
+          category: category.trim(),
+          description: description || undefined,
+          game_mode: game_mode || undefined,
+          screen: screen || undefined,
+          phase: phase || undefined,
+          room_code: room_code || undefined,
+          player_count: typeof player_count === 'number' ? player_count : undefined,
+          players_json: players_json || undefined,
+          game_state_json: game_state_json || undefined,
+          device_info: device_info || undefined,
+          error_log: error_log || undefined,
+          client_version: client_version || undefined,
+        };
+
+        const id = saveIssueReport(report);
+        res.json({ id, status: "saved" });
+      } catch (err) {
+        console.error("[CarkedIt API] Save issue report error:", err);
+        res.status(500).json({ error: "Failed to save issue report" });
+      }
+    });
+
+    app.get("/api/carkedit/issues", (_req: any, res: any) => {
+      try {
+        const limit = Math.min(parseInt(_req.query.limit as string) || 50, 200);
+        const offset = parseInt(_req.query.offset as string) || 0;
+        res.json(getIssueReports(limit, offset));
+      } catch (err) {
+        console.error("[CarkedIt API] Get issue reports error:", err);
+        res.status(500).json({ error: "Failed to retrieve issue reports" });
       }
     });
   },
