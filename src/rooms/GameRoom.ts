@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Room, Client } from "colyseus";
 import { GameState } from "../schema/GameState.js";
 import { Player } from "../schema/Player.js";
@@ -41,7 +42,7 @@ export class GameRoom extends Room<{ state: GameState }> {
     this.setState(new GameState());
 
     // Generate game ID early so all events are linked from the start
-    this._gameId = crypto.randomUUID();
+    this._gameId = randomUUID();
     this._gameStartedAt = new Date().toISOString();
 
     // Poll for game completion and phase changes

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
@@ -10,6 +11,8 @@ import type { GameResult, IssueReport } from "./db/types.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "4500", 10);
 const clientDir = process.env.CLIENT_DIR || path.join(__dirname, "../../carkedit-client");
+
+const serverStartedAt = new Date().toISOString();
 
 const server = defineServer({
   rooms: {
@@ -26,7 +29,7 @@ const server = defineServer({
     app.get("/api/carkedit/version", (_req: any, res: any) => {
       const pkgPath = path.join(__dirname, "../package.json");
       const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
-      res.json({ version: pkg.version });
+      res.json({ version: pkg.version, startedAt: serverStartedAt });
     });
 
     app.get("/api/carkedit/rooms/lookup", async (_req: any, res: any) => {
@@ -64,7 +67,7 @@ const server = defineServer({
 
         const sorted = [...players].sort((a: any, b: any) => b.score - a.score);
         const result: GameResult = {
-          id: crypto.randomUUID(),
+          id: randomUUID(),
           started_at: startedAt,
           finished_at: finishedAt || new Date().toISOString(),
           mode: mode || "local",
@@ -178,7 +181,7 @@ const server = defineServer({
         }
 
         const report: IssueReport = {
-          id: crypto.randomUUID(),
+          id: randomUUID(),
           created_at: new Date().toISOString(),
           category: category.trim(),
           description: description || undefined,
