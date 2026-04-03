@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
@@ -66,7 +67,7 @@ const server = defineServer({
 
         const sorted = [...players].sort((a: any, b: any) => b.score - a.score);
         const result: GameResult = {
-          id: crypto.randomUUID(),
+          id: randomUUID(),
           started_at: startedAt,
           finished_at: finishedAt || new Date().toISOString(),
           mode: mode || "local",
@@ -180,7 +181,7 @@ const server = defineServer({
         }
 
         const report: IssueReport = {
-          id: crypto.randomUUID(),
+          id: randomUUID(),
           created_at: new Date().toISOString(),
           category: category.trim(),
           description: description || undefined,
