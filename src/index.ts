@@ -11,6 +11,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "4500", 10);
 const clientDir = process.env.CLIENT_DIR || path.join(__dirname, "../../carkedit-client");
 
+const serverStartedAt = new Date().toISOString();
+
 const server = defineServer({
   rooms: {
     game: defineRoom(GameRoom),
@@ -26,7 +28,7 @@ const server = defineServer({
     app.get("/api/carkedit/version", (_req: any, res: any) => {
       const pkgPath = path.join(__dirname, "../package.json");
       const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
-      res.json({ version: pkg.version });
+      res.json({ version: pkg.version, startedAt: serverStartedAt });
     });
 
     app.get("/api/carkedit/rooms/lookup", async (_req: any, res: any) => {
