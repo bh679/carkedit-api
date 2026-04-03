@@ -108,6 +108,19 @@ export class GameRoom extends Room<{ state: GameState }> {
         cardId: card?.id,
         cardText: card?.text,
       });
+      // Save die card to card_plays for dashboard visibility
+      if (card && this._gameId) {
+        saveCardPlays([{
+          game_id: this._gameId,
+          round: this.state.round,
+          phase: "die",
+          card_id: String(card.id),
+          card_text: card.text,
+          card_deck: "die",
+          player_name: player?.name || "Unknown",
+          is_winner: false,
+        }]);
+      }
       handleRevealDie(this.state, client);
     });
 
@@ -434,12 +447,8 @@ export class GameRoom extends Room<{ state: GameState }> {
       // Backfill game_id on all events collected during this room's lifetime
       backfillGameId(this.roomId, id);
 
-      // Save accumulated card plays with the game ID
-      if (this._cardPlays.length > 0) {
-        const plays = this._cardPlays.map(p => ({ ...p, game_id: id }));
-        saveCardPlays(plays);
-        console.log(`[GameRoom] ${plays.length} card plays saved`);
-      }
+      // Card plays are now saved in real-time by captureCardPlays()
+      // No bulk save needed here — plays already have correct game_id
 
       this.logEvent(undefined, "game_finished", {
         winnerName: sorted[0]?.name,
@@ -456,12 +465,13 @@ export class GameRoom extends Room<{ state: GameState }> {
     try {
       const phase = this.state.phase.startsWith("bye") ? "bye" : "living";
       const round = this.state.round;
+      const plays: CardPlay[] = [];
 
       for (let i = 0; i < this.state.submittedCards.length; i++) {
         const card = this.state.submittedCards[i];
         const player = card.submittedBy ? this.state.players.get(card.submittedBy) : null;
-        this._cardPlays.push({
-          game_id: "",  // Will be set when game result is saved
+        const play: CardPlay = {
+          game_id: this._gameId!,
           round,
           phase,
           card_id: String(card.id),
@@ -469,7 +479,14 @@ export class GameRoom extends Room<{ state: GameState }> {
           card_deck: card.deck,
           player_name: player?.name || "Unknown",
           is_winner: i === winnerCardIndex,
-        });
+        };
+        this._cardPlays.push(play);
+        plays.push(play);
+      }
+
+      // Save card plays to DB immediately so dashboard can show them for live games
+      if (plays.length > 0) {
+        saveCardPlays(plays);
       }
     } catch (err) {
       console.error("[GameRoom] Failed to capture card plays:", err);

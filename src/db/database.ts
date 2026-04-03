@@ -302,6 +302,60 @@ export function getGameById(id: string): GameDetail | null {
     SELECT player_name, score, rank FROM game_players WHERE game_id = ? ORDER BY rank ASC
   `).all(id) as GamePlayerResult[];
 
+  // For live games with no player results yet, derive from game_events
+  if (game.players.length === 0 && game.live_status === 'live') {
+    // Try game_started event first (has definitive player list and settings)
+    const startedEvent = db.prepare(`
+      SELECT data_json FROM game_events WHERE game_id = ? AND event_type = 'game_started' LIMIT 1
+    `).get(id) as { data_json: string } | undefined;
+
+    if (startedEvent?.data_json) {
+      try {
+        const data = JSON.parse(startedEvent.data_json);
+        // Derive settings for live games
+        if (!game.settings_json && data.settings) {
+          game.settings_json = JSON.stringify(data.settings);
+          if (data.settings.rounds) game.rounds = data.settings.rounds;
+        }
+        const playerNames: string[] = data.playerNames || [];
+        // Count wins per player from winner_selected events
+        const winEvents = db.prepare(`
+          SELECT data_json FROM game_events WHERE game_id = ? AND event_type = 'winner_selected'
+        `).all(id) as { data_json: string }[];
+        const winCounts: Record<string, number> = {};
+        for (const we of winEvents) {
+          try {
+            const wd = JSON.parse(we.data_json);
+            if (wd.winnerName) winCounts[wd.winnerName] = (winCounts[wd.winnerName] || 0) + 1;
+          } catch {}
+        }
+        game.players = playerNames.map((name, i) => ({
+          player_name: name,
+          score: winCounts[name] || 0,
+          rank: i + 1,
+        }));
+      } catch {}
+    } else {
+      // Fall back to player_joined events
+      const joinEvents = db.prepare(`
+        SELECT actor_name FROM game_events WHERE game_id = ? AND event_type = 'player_joined' AND actor_name IS NOT NULL
+      `).all(id) as { actor_name: string }[];
+      const seen = new Set<string>();
+      const names: string[] = [];
+      for (const je of joinEvents) {
+        if (!seen.has(je.actor_name)) {
+          seen.add(je.actor_name);
+          names.push(je.actor_name);
+        }
+      }
+      game.players = names.map((name, i) => ({
+        player_name: name,
+        score: 0,
+        rank: i + 1,
+      }));
+    }
+  }
+
   game.card_plays = db.prepare(`
     SELECT round, phase, card_id, card_text, card_deck, player_name, is_winner
     FROM card_plays WHERE game_id = ? ORDER BY round ASC, is_winner DESC
