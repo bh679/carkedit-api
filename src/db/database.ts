@@ -150,6 +150,96 @@ export function saveGameResult(result: GameResult): string {
   return transaction(result);
 }
 
+export interface LiveGameData {
+  id: string;
+  started_at: string;
+  mode: 'online' | 'local';
+  room_code?: string;
+  host_name?: string;
+  player_count: number;
+  is_dev: boolean;
+  api_version?: string;
+}
+
+export function createLiveGame(data: LiveGameData): string {
+  db.prepare(`
+    INSERT INTO games (id, started_at, finished_at, mode, room_code, host_name, rounds, player_count,
+      winner_name, winner_score, duration_seconds, status, live_status, has_error, is_dev,
+      api_version, client_version, settings_json)
+    VALUES (?, ?, '', ?, ?, ?, 0, ?, '', 0, NULL, 'lobby', 'live', 0, ?, ?, NULL, NULL)
+  `).run(
+    data.id, data.started_at, data.mode, data.room_code ?? null,
+    data.host_name ?? null, data.player_count,
+    data.is_dev ? 1 : 0, data.api_version ?? null
+  );
+  return data.id;
+}
+
+export function updateLiveGame(id: string, updates: { playerCount?: number; status?: string; hostName?: string }): void {
+  const sets: string[] = [];
+  const params: any[] = [];
+  if (updates.playerCount !== undefined) { sets.push('player_count = ?'); params.push(updates.playerCount); }
+  if (updates.status !== undefined) { sets.push('status = ?'); params.push(updates.status); }
+  if (updates.hostName !== undefined) { sets.push('host_name = ?'); params.push(updates.hostName); }
+  if (sets.length === 0) return;
+  params.push(id);
+  db.prepare(`UPDATE games SET ${sets.join(', ')} WHERE id = ? AND live_status = 'live'`).run(...params);
+}
+
+export interface CompleteLiveGameData {
+  finished_at: string;
+  rounds: number;
+  player_count: number;
+  winner_name: string;
+  winner_score: number;
+  duration_seconds?: number;
+  has_error: boolean;
+  is_dev: boolean;
+  settings_json?: string;
+  players: { player_name: string; score: number; rank: number }[];
+}
+
+export function completeLiveGame(id: string, data: CompleteLiveGameData): void {
+  const updateGame = db.prepare(`
+    UPDATE games SET finished_at = ?, rounds = ?, player_count = ?,
+      winner_name = ?, winner_score = ?, duration_seconds = ?,
+      status = 'finished', live_status = 'completed',
+      has_error = ?, is_dev = ?, settings_json = ?
+    WHERE id = ?
+  `);
+
+  const insertPlayer = db.prepare(`
+    INSERT INTO game_players (game_id, player_name, score, rank)
+    VALUES (?, ?, ?, ?)
+  `);
+
+  const transaction = db.transaction(() => {
+    updateGame.run(
+      data.finished_at, data.rounds, data.player_count,
+      data.winner_name, data.winner_score, data.duration_seconds ?? null,
+      data.has_error ? 1 : 0, data.is_dev ? 1 : 0, data.settings_json ?? null,
+      id
+    );
+    for (const p of data.players) {
+      insertPlayer.run(id, p.player_name, p.score, p.rank);
+    }
+  });
+
+  transaction();
+}
+
+export function abandonGame(id: string): void {
+  db.prepare(`
+    UPDATE games SET live_status = 'abandoned', finished_at = ?
+    WHERE id = ? AND live_status = 'live'
+  `).run(new Date().toISOString(), id);
+}
+
+export function getLastActivityForGame(gameId: string): string | null {
+  const row = db.prepare(`SELECT MAX(created_at) as last_activity FROM game_events WHERE game_id = ?`).get(gameId) as { last_activity: string | null } | undefined;
+  return row?.last_activity ?? null;
+}
+
 export interface GameFilters {
   limit?: number;
   offset?: number;
@@ -166,24 +256,25 @@ export function getRecentGames(filters: GameFilters = {}): { games: GameSummary[
   const conditions: string[] = [];
   const params: any[] = [];
 
-  if (dateFrom) { conditions.push('finished_at >= ?'); params.push(dateFrom); }
-  if (dateTo) { conditions.push('finished_at <= ?'); params.push(dateTo); }
-  if (errorsOnly) { conditions.push('has_error = 1'); }
-  if (devFilter === 'dev') { conditions.push('is_dev = 1'); }
-  if (devFilter === 'nodev') { conditions.push('is_dev = 0'); }
-  if (statusFilter === 'finished') { conditions.push("status = 'finished'"); }
-  if (statusFilter === 'abandoned') { conditions.push("live_status = 'abandoned'"); }
-  if (statusFilter === 'live') { conditions.push("live_status = 'live'"); }
+  if (dateFrom) { conditions.push('COALESCE(NULLIF(g.finished_at, \'\'), g.started_at) >= ?'); params.push(dateFrom); }
+  if (dateTo) { conditions.push('COALESCE(NULLIF(g.finished_at, \'\'), g.started_at) <= ?'); params.push(dateTo); }
+  if (errorsOnly) { conditions.push('g.has_error = 1'); }
+  if (devFilter === 'dev') { conditions.push('g.is_dev = 1'); }
+  if (devFilter === 'nodev') { conditions.push('g.is_dev = 0'); }
+  if (statusFilter === 'finished') { conditions.push("g.status = 'finished'"); }
+  if (statusFilter === 'abandoned') { conditions.push("g.live_status = 'abandoned'"); }
+  if (statusFilter === 'live') { conditions.push("g.live_status = 'live'"); }
 
   const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
 
-  const total = (db.prepare(`SELECT COUNT(*) as count FROM games ${where}`).get(...params) as { count: number }).count;
+  const total = (db.prepare(`SELECT COUNT(*) as count FROM games g ${where}`).get(...params) as { count: number }).count;
 
   const games = db.prepare(`
-    SELECT id, started_at, finished_at, mode, room_code, host_name, rounds, player_count,
-      winner_name, winner_score, duration_seconds, status, live_status, has_error, is_dev,
-      api_version, client_version
-    FROM games ${where} ORDER BY finished_at DESC LIMIT ? OFFSET ?
+    SELECT g.id, g.started_at, g.finished_at, g.mode, g.room_code, g.host_name, g.rounds, g.player_count,
+      g.winner_name, g.winner_score, g.duration_seconds, g.status, g.live_status, g.has_error, g.is_dev,
+      g.api_version, g.client_version,
+      (SELECT MAX(e.created_at) FROM game_events e WHERE e.game_id = g.id) as last_activity_at
+    FROM games g ${where} ORDER BY COALESCE(NULLIF(g.finished_at, ''), g.started_at) DESC LIMIT ? OFFSET ?
   `).all(...params, limit, offset) as GameSummary[];
 
   const getPlayers = db.prepare(`
