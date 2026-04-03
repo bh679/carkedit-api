@@ -62,11 +62,12 @@ export class GameRoom extends Room<{ state: GameState }> {
 
     this.onMessage("select_winner", (client, data: { cardIndex: number }) => {
       handleSelectWinner(this.state, client, data.cardIndex);
-      // Auto-advance after 5 seconds if still in winner phase
+      // Auto-advance after winner phase (shorter for 1-round games)
       if (this.state.phase === "living_winner" || this.state.phase === "bye_winner") {
+        const winnerDelay = this.state.rounds === 1 ? 2500 : 5000;
         this.clock.setTimeout(() => {
           handleNextRound(this.state);
-        }, 5000);
+        }, winnerDelay);
       }
     });
 
@@ -105,11 +106,12 @@ export class GameRoom extends Room<{ state: GameState }> {
 
     this.onMessage("pick_best_eulogy", (client, data: { sessionId: string }) => {
       handlePickBestEulogy(this.state, client, data.sessionId);
-      // Auto-advance after 5 seconds if in points phase
+      // Auto-advance after points phase (shorter for 1-round games)
       if (this.state.phase === "eulogy_points") {
+        const winnerDelay = this.state.rounds === 1 ? 2500 : 5000;
         this.clock.setTimeout(() => {
           handleNextWildcard(this.state);
-        }, 5000);
+        }, winnerDelay);
       }
     });
 
