@@ -304,7 +304,7 @@ export function getGameById(id: string): GameDetail | null {
 
   // For live games with no player results yet, derive from game_events
   if (game.players.length === 0 && game.live_status === 'live') {
-    // Try game_started event first (has definitive player list)
+    // Try game_started event first (has definitive player list and settings)
     const startedEvent = db.prepare(`
       SELECT data_json FROM game_events WHERE game_id = ? AND event_type = 'game_started' LIMIT 1
     `).get(id) as { data_json: string } | undefined;
@@ -312,6 +312,11 @@ export function getGameById(id: string): GameDetail | null {
     if (startedEvent?.data_json) {
       try {
         const data = JSON.parse(startedEvent.data_json);
+        // Derive settings for live games
+        if (!game.settings_json && data.settings) {
+          game.settings_json = JSON.stringify(data.settings);
+          if (data.settings.rounds) game.rounds = data.settings.rounds;
+        }
         const playerNames: string[] = data.playerNames || [];
         // Count wins per player from winner_selected events
         const winEvents = db.prepare(`
