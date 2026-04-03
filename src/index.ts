@@ -51,7 +51,7 @@ const server = defineServer({
     // Game history endpoints
     app.post("/api/carkedit/games", (req: any, res: any) => {
       try {
-        const { mode, rounds, players, settings, finishedAt, startedAt, hostName, status, clientVersion } = req.body;
+        const { mode, rounds, players, settings, finishedAt, startedAt, hostName, status, clientVersion, isDev } = req.body;
         if (!players || !Array.isArray(players) || players.length === 0) {
           return res.status(400).json({ error: "players array is required" });
         }
@@ -76,7 +76,7 @@ const server = defineServer({
           status: status || "finished",
           live_status: "completed",
           has_error: false,
-          is_dev: false,
+          is_dev: isDev || false,
           api_version: pkg.version,
           client_version: clientVersion,
           settings_json: settings ? JSON.stringify(settings) : undefined,

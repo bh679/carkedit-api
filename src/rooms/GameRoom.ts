@@ -19,6 +19,12 @@ const apiPkg = JSON.parse(fs.readFileSync(path.join(__dirnameGR, "../../package.
 
 const MIN_PLAYERS = 2;
 
+// Dev/test player names — games where all players match are flagged as dev games
+const DEV_NAME_SET = new Set([
+  'Brennan', 'Simon', 'Leonie', 'Danikah', 'Lowe',
+  'Hatton', 'Sanderson', 'Will', 'Rae', 'Roy',
+]);
+
 function generateRoomCode(): string {
   return ROOM_CODE_WORDS[Math.floor(Math.random() * ROOM_CODE_WORDS.length)];
 }
@@ -305,7 +311,7 @@ export class GameRoom extends Room<{ state: GameState }> {
         status: "finished",
         live_status: "completed",
         has_error: false,
-        is_dev: false,
+        is_dev: sorted.length > 0 && sorted.every((p) => DEV_NAME_SET.has(p.name)),
         api_version: apiPkg.version,
         settings_json: JSON.stringify(settings),
         players: sorted.map((p, i) => ({
