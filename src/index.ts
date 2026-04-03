@@ -44,7 +44,7 @@ const server = defineServer({
         if (!match) {
           return res.status(404).json({ error: "Room not found" });
         }
-        res.json({ roomId: match.roomId });
+        res.json({ roomId: match.roomId, devMode: !!match.metadata?.devMode });
       } catch (err) {
         console.error("[CarkedIt API] Room lookup error:", err);
         res.status(500).json({ error: "Server error" });
