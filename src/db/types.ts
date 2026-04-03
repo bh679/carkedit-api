@@ -53,3 +53,23 @@ export interface GameSummary {
 export interface GameDetail extends GameSummary {
   settings_json: string | null;
 }
+
+export interface CardPlay {
+  game_id: string;
+  round: number;
+  phase: string;
+  card_id: string;
+  card_text: string;
+  card_deck: string;
+  player_name: string;
+  is_winner: boolean;
+}
+
+export interface CardStat {
+  card_id: string;
+  card_text: string;
+  card_deck: string;
+  play_count: number;
+  win_count: number;
+  win_rate: number;
+}

@@ -8,8 +8,8 @@ import { handleRevealDie, handleEndDieTurn } from "../phases/DiePhase.js";
 import { handleSubmitCard, handleRevealSubmission, handleEndConvinceTurn, handleSelectWinner, handleNextRound } from "../phases/LivingPhase.js";
 import { handleStartEulogyRound, handleSelectEulogist, handleConfirmEulogists, handleDoneEulogy, handlePickBestEulogy, handleNextWildcard, handleRevealWinner } from "../phases/EulogyPhase.js";
 import { ROOM_CODE_WORDS } from "./roomWords.js";
-import { saveGameResult } from "../db/database.js";
-import type { GameResult } from "../db/types.js";
+import { saveGameResult, saveCardPlays } from "../db/database.js";
+import type { GameResult, CardPlay } from "../db/types.js";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -27,6 +27,7 @@ export class GameRoom extends Room<{ state: GameState }> {
   maxClients = 10;
   private _gameResultSaved = false;
   private _gameStartedAt: string | null = null;
+  private _cardPlays: CardPlay[] = [];
 
   async onCreate(options: any) {
     this.setState(new GameState());
@@ -79,6 +80,8 @@ export class GameRoom extends Room<{ state: GameState }> {
     });
 
     this.onMessage("select_winner", (client, data: { cardIndex: number }) => {
+      // Capture card plays before handleSelectWinner processes them
+      this.captureCardPlays(data.cardIndex);
       handleSelectWinner(this.state, client, data.cardIndex);
       // Auto-advance after winner phase (shorter for 1-round games)
       if (this.state.phase === "living_winner" || this.state.phase === "bye_winner") {
@@ -314,8 +317,39 @@ export class GameRoom extends Room<{ state: GameState }> {
 
       const id = saveGameResult(result);
       console.log(`[GameRoom] Game result saved: ${id}`);
+
+      // Save accumulated card plays with the game ID
+      if (this._cardPlays.length > 0) {
+        const plays = this._cardPlays.map(p => ({ ...p, game_id: id }));
+        saveCardPlays(plays);
+        console.log(`[GameRoom] ${plays.length} card plays saved`);
+      }
     } catch (err) {
       console.error("[GameRoom] Failed to save game result:", err);
+    }
+  }
+
+  private captureCardPlays(winnerCardIndex: number) {
+    try {
+      const phase = this.state.phase.startsWith("bye") ? "bye" : "living";
+      const round = this.state.round;
+
+      for (let i = 0; i < this.state.submittedCards.length; i++) {
+        const card = this.state.submittedCards[i];
+        const player = card.submittedBy ? this.state.players.get(card.submittedBy) : null;
+        this._cardPlays.push({
+          game_id: "",  // Will be set when game result is saved
+          round,
+          phase,
+          card_id: String(card.id),
+          card_text: card.text,
+          card_deck: card.deck,
+          player_name: player?.name || "Unknown",
+          is_winner: i === winnerCardIndex,
+        });
+      }
+    } catch (err) {
+      console.error("[GameRoom] Failed to capture card plays:", err);
     }
   }
 

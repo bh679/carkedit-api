@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import type { GameResult, GameSummary, GameDetail, GamePlayerResult } from './types.js';
+import type { GameResult, GameSummary, GameDetail, GamePlayerResult, CardPlay, CardStat } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.resolve(__dirname, '../../data/games.db');
@@ -45,6 +45,21 @@ export function initDatabase(): void {
 
     CREATE INDEX IF NOT EXISTS idx_game_players_game_id ON game_players(game_id);
     CREATE INDEX IF NOT EXISTS idx_games_finished_at ON games(finished_at);
+
+    CREATE TABLE IF NOT EXISTS card_plays (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      game_id TEXT NOT NULL REFERENCES games(id),
+      round INTEGER NOT NULL,
+      phase TEXT NOT NULL,
+      card_id TEXT NOT NULL,
+      card_text TEXT NOT NULL,
+      card_deck TEXT NOT NULL,
+      player_name TEXT NOT NULL,
+      is_winner INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_card_plays_card_id ON card_plays(card_id, card_deck);
+    CREATE INDEX IF NOT EXISTS idx_card_plays_game_id ON card_plays(game_id);
   `);
 
   // Migrate: add new columns if they don't exist (for existing DBs)
@@ -151,4 +166,40 @@ export function getStats(): { totalGames: number; totalPlayers: number; totalPla
   const longestPlayTime = (db.prepare("SELECT COALESCE(MAX(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL").get() as any).c;
 
   return { totalGames, totalPlayers, totalPlayTime, avgPlayTime: Math.round(avgPlayTime), medianPlayTime: Math.round(medianPlayTime), longestPlayTime };
+}
+
+export function saveCardPlays(plays: CardPlay[]): void {
+  const insert = db.prepare(`
+    INSERT INTO card_plays (game_id, round, phase, card_id, card_text, card_deck, player_name, is_winner)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const transaction = db.transaction((items: CardPlay[]) => {
+    for (const p of items) {
+      insert.run(p.game_id, p.round, p.phase, p.card_id, p.card_text, p.card_deck, p.player_name, p.is_winner ? 1 : 0);
+    }
+  });
+
+  transaction(plays);
+}
+
+export function getCardStats(): { mostPlayed: CardStat[]; leastPlayed: CardStat[]; highestWinRate: CardStat[] } {
+  const allCards = db.prepare(`
+    SELECT card_id, card_text, card_deck,
+      COUNT(*) as play_count,
+      SUM(is_winner) as win_count
+    FROM card_plays
+    GROUP BY card_id, card_deck
+    ORDER BY play_count DESC
+  `).all() as (CardStat & { win_count: number })[];
+
+  for (const card of allCards) {
+    card.win_rate = card.play_count > 0 ? Math.round((card.win_count / card.play_count) * 100) : 0;
+  }
+
+  const mostPlayed = allCards.slice(0, 10);
+  const leastPlayed = [...allCards].sort((a, b) => a.play_count - b.play_count).slice(0, 10);
+  const highestWinRate = allCards.filter(c => c.play_count >= 3).sort((a, b) => b.win_rate - a.win_rate).slice(0, 10);
+
+  return { mostPlayed, leastPlayed, highestWinRate };
 }
