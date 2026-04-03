@@ -47,6 +47,7 @@ export interface GameSummary {
   is_dev: number;
   api_version: string | null;
   client_version: string | null;
+  last_activity_at: string | null;
   players: GamePlayerResult[];
 }
 

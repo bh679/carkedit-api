@@ -8,7 +8,7 @@ import { handleRevealDie, handleEndDieTurn } from "../phases/DiePhase.js";
 import { handleSubmitCard, handleRevealSubmission, handleEndConvinceTurn, handleSelectWinner, handleNextRound } from "../phases/LivingPhase.js";
 import { handleStartEulogyRound, handleSelectEulogist, handleConfirmEulogists, handleDoneEulogy, handlePickBestEulogy, handleNextWildcard, handleRevealWinner } from "../phases/EulogyPhase.js";
 import { ROOM_CODE_WORDS } from "./roomWords.js";
-import { saveGameResult, saveCardPlays, saveGameEvent, backfillGameId } from "../db/database.js";
+import { saveGameResult, saveCardPlays, saveGameEvent, backfillGameId, createLiveGame, updateLiveGame, completeLiveGame, abandonGame } from "../db/database.js";
 import type { GameResult, CardPlay, GameEvent } from "../db/types.js";
 import fs from "fs";
 import path from "path";
@@ -40,19 +40,26 @@ export class GameRoom extends Room<{ state: GameState }> {
   async onCreate(options: any) {
     this.setState(new GameState());
 
+    // Generate game ID early so all events are linked from the start
+    this._gameId = crypto.randomUUID();
+    this._gameStartedAt = new Date().toISOString();
+
     // Poll for game completion and phase changes
     this.clock.setInterval(() => {
       if (this.state.phase === "winner" && !this._gameResultSaved) {
         this._gameResultSaved = true;
         this.persistGameResults();
       }
-      // Track phase changes
+      // Track phase changes and update live game record
       if (this.state.phase !== this._previousPhase) {
         this.logEvent(undefined, "phase_changed", {
           from: this._previousPhase,
           to: this.state.phase,
         });
         this._previousPhase = this.state.phase;
+        if (this._gameId) {
+          try { updateLiveGame(this._gameId, { status: this.state.phase }); } catch {}
+        }
       }
     }, 1000);
 
@@ -62,6 +69,23 @@ export class GameRoom extends Room<{ state: GameState }> {
       this.state.roomCode = roomCode;
       await this.setPrivate(true);
       await this.setMetadata({ roomCode });
+    }
+
+    // Create live game record in DB
+    try {
+      createLiveGame({
+        id: this._gameId,
+        started_at: this._gameStartedAt,
+        mode: 'online',
+        room_code: this.state.roomCode || undefined,
+        host_name: undefined, // Host joins after creation
+        player_count: 0,
+        is_dev: false,
+        api_version: apiPkg.version,
+      });
+      console.log(`[GameRoom] Live game created in DB: ${this._gameId}`);
+    } catch (err) {
+      console.error(`[GameRoom] Failed to create live game:`, err);
     }
 
     this.logEvent(undefined, "room_created", {
@@ -243,6 +267,16 @@ export class GameRoom extends Room<{ state: GameState }> {
       playerCount: this.state.players.size,
     });
 
+    // Update live game record with player count and host name
+    if (this._gameId) {
+      try {
+        updateLiveGame(this._gameId, {
+          playerCount: this.state.players.size,
+          ...(isHost ? { hostName: player.name } : {}),
+        });
+      } catch {}
+    }
+
     console.log(`[GameRoom] ${player.name} joined (${client.sessionId})`);
   }
 
@@ -278,6 +312,17 @@ export class GameRoom extends Room<{ state: GameState }> {
 
   onDispose() {
     this.logEvent(undefined, "room_disposed");
+
+    // Mark game as abandoned if it wasn't completed
+    if (this._gameId && !this._gameResultSaved) {
+      try {
+        abandonGame(this._gameId);
+        console.log(`[GameRoom] Game marked as abandoned: ${this._gameId}`);
+      } catch (err) {
+        console.error(`[GameRoom] Failed to mark game as abandoned:`, err);
+      }
+    }
+
     console.log(`[GameRoom] Room disposed`);
   }
 
@@ -369,34 +414,26 @@ export class GameRoom extends Room<{ state: GameState }> {
       // Get host name
       const hostPlayer = this.state.hostId ? this.state.players.get(this.state.hostId) : null;
 
-      const result: GameResult = {
-        id: crypto.randomUUID(),
-        started_at: this._gameStartedAt || undefined,
+      const id = this._gameId!;
+
+      completeLiveGame(id, {
         finished_at: now,
-        mode: "online",
-        room_code: this.state.roomCode || undefined,
-        host_name: hostPlayer?.name || undefined,
         rounds: this.state.rounds,
         player_count: sorted.length,
         winner_name: sorted[0]?.name || "Unknown",
         winner_score: sorted[0]?.score || 0,
         duration_seconds: durationSeconds,
-        status: "finished",
-        live_status: "completed",
         has_error: false,
         is_dev: sorted.length > 0 && sorted.every((p) => DEV_NAME_SET.has(p.name)),
-        api_version: apiPkg.version,
         settings_json: JSON.stringify(settings),
         players: sorted.map((p, i) => ({
           player_name: p.name,
           score: p.score,
           rank: i + 1,
         })),
-      };
+      });
 
-      const id = saveGameResult(result);
-      this._gameId = id;
-      console.log(`[GameRoom] Game result saved: ${id}`);
+      console.log(`[GameRoom] Game result completed: ${id}`);
 
       // Backfill game_id on all events collected during this room's lifetime
       backfillGameId(this.roomId, id);
