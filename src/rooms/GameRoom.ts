@@ -58,12 +58,17 @@ export class GameRoom extends Room<{ state: GameState }> {
       }
     }, 1000);
 
+    // Set dev mode if requested (must be set at room creation time)
+    if (options.devMode) {
+      this.state.devMode = true;
+    }
+
     if (options.private) {
       const roomCode = generateRoomCode();
       this.state.isPrivate = true;
       this.state.roomCode = roomCode;
       await this.setPrivate(true);
-      await this.setMetadata({ roomCode });
+      await this.setMetadata({ roomCode, devMode: !!options.devMode });
     }
 
     // Create live game record in DB
@@ -75,7 +80,7 @@ export class GameRoom extends Room<{ state: GameState }> {
         room_code: this.state.roomCode || undefined,
         host_name: undefined, // Host joins after creation
         player_count: 0,
-        is_dev: false,
+        is_dev: this.state.devMode,
         api_version: apiPkg.version,
       });
       console.log(`[GameRoom] Live game created in DB: ${this._gameId}`);
@@ -86,6 +91,7 @@ export class GameRoom extends Room<{ state: GameState }> {
     this.logEvent(undefined, "room_created", {
       isPrivate: this.state.isPrivate,
       roomCode: this.state.roomCode || null,
+      devMode: this.state.devMode,
     });
 
     this.onMessage("ready", (client) => {
@@ -433,7 +439,7 @@ export class GameRoom extends Room<{ state: GameState }> {
         winner_score: sorted[0]?.score || 0,
         duration_seconds: durationSeconds,
         has_error: false,
-        is_dev: sorted.length > 0 && sorted.every((p) => p.isDevName),
+        is_dev: this.state.devMode,
         settings_json: JSON.stringify(settings),
         players: sorted.map((p, i) => ({
           player_name: p.name,
