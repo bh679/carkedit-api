@@ -8,6 +8,14 @@ import { handleRevealDie, handleEndDieTurn } from "../phases/DiePhase.js";
 import { handleSubmitCard, handleRevealSubmission, handleEndConvinceTurn, handleSelectWinner, handleNextRound } from "../phases/LivingPhase.js";
 import { handleStartEulogyRound, handleSelectEulogist, handleConfirmEulogists, handleDoneEulogy, handlePickBestEulogy, handleNextWildcard, handleRevealWinner } from "../phases/EulogyPhase.js";
 import { ROOM_CODE_WORDS } from "./roomWords.js";
+import { saveGameResult, saveCardPlays } from "../db/database.js";
+import type { GameResult, CardPlay } from "../db/types.js";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirnameGR = path.dirname(fileURLToPath(import.meta.url));
+const apiPkg = JSON.parse(fs.readFileSync(path.join(__dirnameGR, "../../package.json"), "utf-8"));
 
 const MIN_PLAYERS = 2;
 
@@ -17,9 +25,20 @@ function generateRoomCode(): string {
 
 export class GameRoom extends Room<{ state: GameState }> {
   maxClients = 10;
+  private _gameResultSaved = false;
+  private _gameStartedAt: string | null = null;
+  private _cardPlays: CardPlay[] = [];
 
   async onCreate(options: any) {
     this.setState(new GameState());
+
+    // Poll for game completion to persist results
+    this.clock.setInterval(() => {
+      if (this.state.phase === "winner" && !this._gameResultSaved) {
+        this._gameResultSaved = true;
+        this.persistGameResults();
+      }
+    }, 1000);
 
     if (options.private) {
       const roomCode = generateRoomCode();
@@ -61,6 +80,8 @@ export class GameRoom extends Room<{ state: GameState }> {
     });
 
     this.onMessage("select_winner", (client, data: { cardIndex: number }) => {
+      // Capture card plays before handleSelectWinner processes them
+      this.captureCardPlays(data.cardIndex);
       handleSelectWinner(this.state, client, data.cardIndex);
       // Auto-advance after winner phase (shorter for 1-round games)
       if (this.state.phase === "living_winner" || this.state.phase === "bye_winner") {
@@ -240,8 +261,101 @@ export class GameRoom extends Room<{ state: GameState }> {
     return allReady;
   }
 
+  private persistGameResults() {
+    try {
+      const players: { name: string; score: number }[] = [];
+      this.state.players.forEach((player) => {
+        players.push({ name: player.name, score: player.score });
+      });
+
+      const sorted = [...players].sort((a, b) => b.score - a.score);
+      const now = new Date().toISOString();
+      let durationSeconds: number | undefined;
+      if (this._gameStartedAt) {
+        durationSeconds = Math.round(
+          (Date.now() - new Date(this._gameStartedAt).getTime()) / 1000
+        );
+      }
+
+      const settings: Record<string, any> = {};
+      const settingKeys = [
+        "rounds", "handSize", "enableDie", "enableLive", "enableBye", "enableEulogy",
+        "forceWildcards", "playableWildcards", "wildcardCount", "eulogistCount",
+        "optionalCardPlay", "ultraQuickMode", "timerEnabled", "pitchDuration",
+      ];
+      for (const key of settingKeys) {
+        settings[key] = (this.state as any)[key];
+      }
+
+      // Get host name
+      const hostPlayer = this.state.hostId ? this.state.players.get(this.state.hostId) : null;
+
+      const result: GameResult = {
+        id: crypto.randomUUID(),
+        started_at: this._gameStartedAt || undefined,
+        finished_at: now,
+        mode: "online",
+        room_code: this.state.roomCode || undefined,
+        host_name: hostPlayer?.name || undefined,
+        rounds: this.state.rounds,
+        player_count: sorted.length,
+        winner_name: sorted[0]?.name || "Unknown",
+        winner_score: sorted[0]?.score || 0,
+        duration_seconds: durationSeconds,
+        status: "finished",
+        live_status: "completed",
+        has_error: false,
+        is_dev: false,
+        api_version: apiPkg.version,
+        settings_json: JSON.stringify(settings),
+        players: sorted.map((p, i) => ({
+          player_name: p.name,
+          score: p.score,
+          rank: i + 1,
+        })),
+      };
+
+      const id = saveGameResult(result);
+      console.log(`[GameRoom] Game result saved: ${id}`);
+
+      // Save accumulated card plays with the game ID
+      if (this._cardPlays.length > 0) {
+        const plays = this._cardPlays.map(p => ({ ...p, game_id: id }));
+        saveCardPlays(plays);
+        console.log(`[GameRoom] ${plays.length} card plays saved`);
+      }
+    } catch (err) {
+      console.error("[GameRoom] Failed to save game result:", err);
+    }
+  }
+
+  private captureCardPlays(winnerCardIndex: number) {
+    try {
+      const phase = this.state.phase.startsWith("bye") ? "bye" : "living";
+      const round = this.state.round;
+
+      for (let i = 0; i < this.state.submittedCards.length; i++) {
+        const card = this.state.submittedCards[i];
+        const player = card.submittedBy ? this.state.players.get(card.submittedBy) : null;
+        this._cardPlays.push({
+          game_id: "",  // Will be set when game result is saved
+          round,
+          phase,
+          card_id: String(card.id),
+          card_text: card.text,
+          card_deck: card.deck,
+          player_name: player?.name || "Unknown",
+          is_winner: i === winnerCardIndex,
+        });
+      }
+    } catch (err) {
+      console.error("[GameRoom] Failed to capture card plays:", err);
+    }
+  }
+
   private startGame() {
     console.log(`[GameRoom] Game starting — creating decks`);
+    this._gameStartedAt = new Date().toISOString();
 
     const shuffledDieDeck = shuffle(createDeck(DIE_CARDS, "die"));
     const shuffledLivingDeck = shuffle(createDeck(LIVING_CARDS, "living"));

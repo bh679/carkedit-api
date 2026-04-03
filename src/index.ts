@@ -4,6 +4,8 @@ import { fileURLToPath } from "url";
 import express from "express";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
+import { initDatabase, saveGameResult, getRecentGames, getGameById, getStats, getCardStats } from "./db/database.js";
+import type { GameResult } from "./db/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "4500", 10);
@@ -14,6 +16,7 @@ const server = defineServer({
     game: defineRoom(GameRoom),
   },
   express: (app) => {
+    app.use(express.json());
     app.use(express.static(clientDir));
 
     app.get("/api/carkedit/health", (_req: any, res: any) => {
@@ -44,8 +47,105 @@ const server = defineServer({
         res.status(500).json({ error: "Server error" });
       }
     });
+
+    // Game history endpoints
+    app.post("/api/carkedit/games", (req: any, res: any) => {
+      try {
+        const { mode, rounds, players, settings, finishedAt, startedAt, hostName, status, clientVersion } = req.body;
+        if (!players || !Array.isArray(players) || players.length === 0) {
+          return res.status(400).json({ error: "players array is required" });
+        }
+        if (!rounds || rounds < 1) {
+          return res.status(400).json({ error: "rounds must be >= 1" });
+        }
+
+        const pkgPath = path.join(__dirname, "../package.json");
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+
+        const sorted = [...players].sort((a: any, b: any) => b.score - a.score);
+        const result: GameResult = {
+          id: crypto.randomUUID(),
+          started_at: startedAt,
+          finished_at: finishedAt || new Date().toISOString(),
+          mode: mode || "local",
+          host_name: hostName,
+          rounds,
+          player_count: players.length,
+          winner_name: sorted[0].name,
+          winner_score: sorted[0].score,
+          status: status || "finished",
+          live_status: "completed",
+          has_error: false,
+          is_dev: false,
+          api_version: pkg.version,
+          client_version: clientVersion,
+          settings_json: settings ? JSON.stringify(settings) : undefined,
+          players: sorted.map((p: any, i: number) => ({
+            player_name: p.name,
+            score: p.score,
+            rank: i + 1,
+          })),
+        };
+
+        const id = saveGameResult(result);
+        res.json({ id, status: "saved" });
+      } catch (err) {
+        console.error("[CarkedIt API] Save game error:", err);
+        res.status(500).json({ error: "Failed to save game" });
+      }
+    });
+
+    app.get("/api/carkedit/games/stats", (_req: any, res: any) => {
+      try {
+        res.json(getStats());
+      } catch (err) {
+        console.error("[CarkedIt API] Get stats error:", err);
+        res.status(500).json({ error: "Failed to retrieve stats" });
+      }
+    });
+
+    app.get("/api/carkedit/cards/stats", (_req: any, res: any) => {
+      try {
+        res.json(getCardStats());
+      } catch (err) {
+        console.error("[CarkedIt API] Get card stats error:", err);
+        res.status(500).json({ error: "Failed to retrieve card stats" });
+      }
+    });
+
+    app.get("/api/carkedit/games", (_req: any, res: any) => {
+      try {
+        const result = getRecentGames({
+          limit: Math.min(parseInt(_req.query.limit as string) || 20, 100),
+          offset: parseInt(_req.query.offset as string) || 0,
+          dateFrom: _req.query.dateFrom as string || undefined,
+          dateTo: _req.query.dateTo as string || undefined,
+          errorsOnly: _req.query.errorsOnly === 'true',
+          devFilter: (['all', 'dev', 'nodev'].includes(_req.query.dev) ? _req.query.dev : 'all') as any,
+          statusFilter: (['all', 'finished', 'unfinished'].includes(_req.query.status) ? _req.query.status : 'all') as any,
+        });
+        res.json(result);
+      } catch (err) {
+        console.error("[CarkedIt API] Get games error:", err);
+        res.status(500).json({ error: "Failed to retrieve games" });
+      }
+    });
+
+    app.get("/api/carkedit/games/:id", (req: any, res: any) => {
+      try {
+        const game = getGameById(req.params.id);
+        if (!game) return res.status(404).json({ error: "Game not found" });
+        res.json(game);
+      } catch (err) {
+        console.error("[CarkedIt API] Get game error:", err);
+        res.status(500).json({ error: "Failed to retrieve game" });
+      }
+    });
   },
 });
+
+initDatabase();
+console.log("[CarkedIt API] Database initialized");
 
 server.listen(port);
 console.log(`[CarkedIt API] Listening on port ${port}`);
