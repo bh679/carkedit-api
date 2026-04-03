@@ -115,9 +115,15 @@ const server = defineServer({
 
     app.get("/api/carkedit/games", (_req: any, res: any) => {
       try {
-        const limit = Math.min(parseInt(_req.query.limit as string) || 20, 100);
-        const offset = parseInt(_req.query.offset as string) || 0;
-        const result = getRecentGames(limit, offset);
+        const result = getRecentGames({
+          limit: Math.min(parseInt(_req.query.limit as string) || 20, 100),
+          offset: parseInt(_req.query.offset as string) || 0,
+          dateFrom: _req.query.dateFrom as string || undefined,
+          dateTo: _req.query.dateTo as string || undefined,
+          errorsOnly: _req.query.errorsOnly === 'true',
+          devFilter: (['all', 'dev', 'nodev'].includes(_req.query.dev) ? _req.query.dev : 'all') as any,
+          statusFilter: (['all', 'finished', 'unfinished'].includes(_req.query.status) ? _req.query.status : 'all') as any,
+        });
         res.json(result);
       } catch (err) {
         console.error("[CarkedIt API] Get games error:", err);

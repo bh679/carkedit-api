@@ -111,15 +111,40 @@ export function saveGameResult(result: GameResult): string {
   return transaction(result);
 }
 
-export function getRecentGames(limit = 20, offset = 0): { games: GameSummary[]; total: number } {
-  const total = (db.prepare('SELECT COUNT(*) as count FROM games').get() as { count: number }).count;
+export interface GameFilters {
+  limit?: number;
+  offset?: number;
+  dateFrom?: string;
+  dateTo?: string;
+  errorsOnly?: boolean;
+  devFilter?: 'all' | 'dev' | 'nodev';
+  statusFilter?: 'all' | 'finished' | 'unfinished';
+}
+
+export function getRecentGames(filters: GameFilters = {}): { games: GameSummary[]; total: number } {
+  const { limit = 20, offset = 0, dateFrom, dateTo, errorsOnly, devFilter = 'all', statusFilter = 'all' } = filters;
+
+  const conditions: string[] = [];
+  const params: any[] = [];
+
+  if (dateFrom) { conditions.push('finished_at >= ?'); params.push(dateFrom); }
+  if (dateTo) { conditions.push('finished_at <= ?'); params.push(dateTo); }
+  if (errorsOnly) { conditions.push('has_error = 1'); }
+  if (devFilter === 'dev') { conditions.push('is_dev = 1'); }
+  if (devFilter === 'nodev') { conditions.push('is_dev = 0'); }
+  if (statusFilter === 'finished') { conditions.push("status = 'finished'"); }
+  if (statusFilter === 'unfinished') { conditions.push("status != 'finished'"); }
+
+  const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
+
+  const total = (db.prepare(`SELECT COUNT(*) as count FROM games ${where}`).get(...params) as { count: number }).count;
 
   const games = db.prepare(`
     SELECT id, started_at, finished_at, mode, room_code, host_name, rounds, player_count,
       winner_name, winner_score, duration_seconds, status, live_status, has_error, is_dev,
       api_version, client_version
-    FROM games ORDER BY finished_at DESC LIMIT ? OFFSET ?
-  `).all(limit, offset) as GameSummary[];
+    FROM games ${where} ORDER BY finished_at DESC LIMIT ? OFFSET ?
+  `).all(...params, limit, offset) as GameSummary[];
 
   const getPlayers = db.prepare(`
     SELECT player_name, score, rank FROM game_players WHERE game_id = ? ORDER BY rank ASC
@@ -204,9 +229,9 @@ export function getCardStats(): { mostPlayed: CardStat[]; leastPlayed: CardStat[
     card.win_rate = card.play_count > 0 ? Math.round((card.win_count / card.play_count) * 100) : 0;
   }
 
-  const mostPlayed = allCards.slice(0, 10);
-  const leastPlayed = [...allCards].sort((a, b) => a.play_count - b.play_count).slice(0, 10);
-  const highestWinRate = allCards.filter(c => c.play_count >= 3).sort((a, b) => b.win_rate - a.win_rate).slice(0, 10);
+  const mostPlayed = allCards.slice(0, 20);
+  const leastPlayed = [...allCards].sort((a, b) => a.play_count - b.play_count).slice(0, 20);
+  const highestWinRate = allCards.filter(c => c.play_count >= 3).sort((a, b) => b.win_rate - a.win_rate).slice(0, 20);
 
   return { mostPlayed, leastPlayed, highestWinRate };
 }
