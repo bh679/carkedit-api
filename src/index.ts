@@ -1,4 +1,5 @@
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 import express from "express";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
@@ -17,6 +18,12 @@ const server = defineServer({
 
     app.get("/api/carkedit/health", (_req: any, res: any) => {
       res.json({ status: "ok", timestamp: new Date().toISOString() });
+    });
+
+    app.get("/api/carkedit/version", (_req: any, res: any) => {
+      const pkgPath = path.join(__dirname, "../package.json");
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+      res.json({ version: pkg.version });
     });
 
     app.get("/api/carkedit/rooms/lookup", async (_req: any, res: any) => {
