@@ -217,6 +217,26 @@ export function getStats(): { finishedGames: number; totalGames: number; unfinis
   return { finishedGames, totalGames, unfinishedGames, totalPlayers, totalPlayTime, avgPlayTime: Math.round(avgPlayTime), medianPlayTime: Math.round(medianPlayTime), longestPlayTime };
 }
 
+export function getStatsByPeriod(since: string): { finishedGames: number; totalGames: number; unfinishedGames: number; totalPlayers: number; totalPlayTime: number; avgPlayTime: number; medianPlayTime: number; longestPlayTime: number } {
+  const finishedGames = (db.prepare("SELECT COUNT(*) as c FROM games WHERE status = 'finished' AND finished_at >= ?").get(since) as any).c;
+  const totalGames = (db.prepare("SELECT COUNT(*) as c FROM games WHERE finished_at >= ?").get(since) as any).c;
+  const unfinishedGames = totalGames - finishedGames;
+  const totalPlayers = (db.prepare("SELECT COALESCE(SUM(player_count), 0) as c FROM games WHERE status = 'finished' AND finished_at >= ?").get(since) as any).c;
+  const totalPlayTime = (db.prepare("SELECT COALESCE(SUM(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL AND finished_at >= ?").get(since) as any).c;
+  const avgPlayTime = (db.prepare("SELECT COALESCE(AVG(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL AND finished_at >= ?").get(since) as any).c;
+
+  const durations = db.prepare("SELECT duration_seconds FROM games WHERE duration_seconds IS NOT NULL AND finished_at >= ? ORDER BY duration_seconds").all(since).map((r: any) => r.duration_seconds);
+  let medianPlayTime = 0;
+  if (durations.length > 0) {
+    const mid = Math.floor(durations.length / 2);
+    medianPlayTime = durations.length % 2 === 0 ? (durations[mid - 1] + durations[mid]) / 2 : durations[mid];
+  }
+
+  const longestPlayTime = (db.prepare("SELECT COALESCE(MAX(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL AND finished_at >= ?").get(since) as any).c;
+
+  return { finishedGames, totalGames, unfinishedGames, totalPlayers, totalPlayTime, avgPlayTime: Math.round(avgPlayTime), medianPlayTime: Math.round(medianPlayTime), longestPlayTime };
+}
+
 export function saveCardPlays(plays: CardPlay[]): void {
   const insert = db.prepare(`
     INSERT INTO card_plays (game_id, round, phase, card_id, card_text, card_deck, player_name, is_winner)
