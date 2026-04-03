@@ -80,7 +80,7 @@ function transitionToLivingSetup(state: GameState): void {
 
   state.currentLivingDead = state.turnOrder[0];
   state.currentTurn = state.turnOrder[0];
-  state.round = 1;
+  state.round = 0;
   state.phase = "living_submit";
 
   console.log(`[LivingPhase] Setup complete — ${state.currentLivingDead} is The Living Dead`);

@@ -168,10 +168,9 @@ export function handleNextRound(state: GameState, _client?: Client): void {
   const nextLivingDead = getNextLivingDead(state);
 
   if (nextLivingDead) {
-    // Continue with next Living Dead
+    // Continue with next Living Dead (same round)
     state.currentLivingDead = nextLivingDead;
     state.currentTurn = nextLivingDead;
-    state.round++;
 
     if (wasLiving) {
       state.phase = "living_submit";
@@ -181,11 +180,32 @@ export function handleNextRound(state: GameState, _client?: Client): void {
 
     console.log(`[LivingPhase] Next Living Dead: ${nextLivingDead}`);
   } else {
-    // All players have been Living Dead
-    if (wasLiving) {
-      transitionAfterLiving(state);
+    // All players have been Living Dead — round complete
+    state.round++;
+    console.log(`[LivingPhase] Round ${state.round} of ${state.rounds} complete`);
+
+    if (state.round >= state.rounds) {
+      // All rounds done — transition to next phase
+      if (wasLiving) {
+        transitionAfterLiving(state);
+      } else {
+        transitionAfterBye(state);
+      }
     } else {
-      transitionAfterBye(state);
+      // More rounds remain — reset Living Dead tracking and start next round
+      state.players.forEach((p) => {
+        p.hasBeenLivingDead = false;
+      });
+      state.currentLivingDead = state.turnOrder[0];
+      state.currentTurn = state.turnOrder[0];
+
+      if (wasLiving) {
+        state.phase = "living_submit";
+      } else {
+        state.phase = "bye_submit";
+      }
+
+      console.log(`[LivingPhase] Starting round ${state.round + 1} — ${state.currentLivingDead} is The Living Dead`);
     }
   }
 }
@@ -335,7 +355,7 @@ export function transitionToByeSetup(state: GameState): void {
   // Set first player as Living Dead for Bye phase
   state.currentLivingDead = state.turnOrder[0];
   state.currentTurn = state.turnOrder[0];
-  state.round = 1;
+  state.round = 0;
   state.phase = "bye_submit";
 
   console.log(`[ByePhase] Setup complete — ${state.currentLivingDead} is The Living Dead`);
