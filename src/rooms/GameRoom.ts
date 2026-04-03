@@ -20,12 +20,6 @@ const apiPkg = JSON.parse(fs.readFileSync(path.join(__dirnameGR, "../../package.
 
 const MIN_PLAYERS = 2;
 
-// Dev/test player names — games where all players match are flagged as dev games
-const DEV_NAME_SET = new Set([
-  'Brennan', 'Simon', 'Leonie', 'Danikah', 'Lowe',
-  'Hatton', 'Sanderson', 'Will', 'Rae', 'Roy',
-]);
-
 function generateRoomCode(): string {
   return ROOM_CODE_WORDS[Math.floor(Math.random() * ROOM_CODE_WORDS.length)];
 }
@@ -247,6 +241,7 @@ export class GameRoom extends Room<{ state: GameState }> {
     const day = parseInt(options.birthDay, 10);
     player.birthMonth = (month >= 1 && month <= 12) ? month : 0;
     player.birthDay = (day >= 1 && day <= 31) ? day : 0;
+    player.isDevName = !!options.isDevName;
     this.state.players.set(client.sessionId, player);
 
     const isHost = !this.state.hostId;
@@ -388,9 +383,9 @@ export class GameRoom extends Room<{ state: GameState }> {
 
   private persistGameResults() {
     try {
-      const players: { name: string; score: number }[] = [];
+      const players: { name: string; score: number; isDevName: boolean }[] = [];
       this.state.players.forEach((player) => {
-        players.push({ name: player.name, score: player.score });
+        players.push({ name: player.name, score: player.score, isDevName: player.isDevName });
       });
 
       const sorted = [...players].sort((a, b) => b.score - a.score);
@@ -425,7 +420,7 @@ export class GameRoom extends Room<{ state: GameState }> {
         winner_score: sorted[0]?.score || 0,
         duration_seconds: durationSeconds,
         has_error: false,
-        is_dev: sorted.length > 0 && sorted.every((p) => DEV_NAME_SET.has(p.name)),
+        is_dev: sorted.length > 0 && sorted.every((p) => p.isDevName),
         settings_json: JSON.stringify(settings),
         players: sorted.map((p, i) => ({
           player_name: p.name,
