@@ -154,8 +154,10 @@ export function getGameById(id: string): GameDetail | null {
   return game;
 }
 
-export function getStats(): { totalGames: number; totalPlayers: number; totalPlayTime: number; avgPlayTime: number; medianPlayTime: number; longestPlayTime: number } {
-  const totalGames = (db.prepare("SELECT COUNT(*) as c FROM games WHERE status = 'finished'").get() as any).c;
+export function getStats(): { finishedGames: number; totalGames: number; unfinishedGames: number; totalPlayers: number; totalPlayTime: number; avgPlayTime: number; medianPlayTime: number; longestPlayTime: number } {
+  const finishedGames = (db.prepare("SELECT COUNT(*) as c FROM games WHERE status = 'finished'").get() as any).c;
+  const totalGames = (db.prepare("SELECT COUNT(*) as c FROM games").get() as any).c;
+  const unfinishedGames = totalGames - finishedGames;
   const totalPlayers = (db.prepare("SELECT COALESCE(SUM(player_count), 0) as c FROM games WHERE status = 'finished'").get() as any).c;
   const totalPlayTime = (db.prepare("SELECT COALESCE(SUM(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL").get() as any).c;
   const avgPlayTime = (db.prepare("SELECT COALESCE(AVG(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL").get() as any).c;
@@ -170,7 +172,7 @@ export function getStats(): { totalGames: number; totalPlayers: number; totalPla
 
   const longestPlayTime = (db.prepare("SELECT COALESCE(MAX(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL").get() as any).c;
 
-  return { totalGames, totalPlayers, totalPlayTime, avgPlayTime: Math.round(avgPlayTime), medianPlayTime: Math.round(medianPlayTime), longestPlayTime };
+  return { finishedGames, totalGames, unfinishedGames, totalPlayers, totalPlayTime, avgPlayTime: Math.round(avgPlayTime), medianPlayTime: Math.round(medianPlayTime), longestPlayTime };
 }
 
 export function saveCardPlays(plays: CardPlay[]): void {
