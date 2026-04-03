@@ -114,6 +114,19 @@ export class GameRoom extends Room<{ state: GameState }> {
         cardId: card?.id,
         cardText: card?.text,
       });
+      // Save die card to card_plays for dashboard visibility
+      if (card && this._gameId) {
+        saveCardPlays([{
+          game_id: this._gameId,
+          round: this.state.round,
+          phase: "die",
+          card_id: String(card.id),
+          card_text: card.text,
+          card_deck: "die",
+          player_name: player?.name || "Unknown",
+          is_winner: false,
+        }]);
+      }
       handleRevealDie(this.state, client);
     });
 
