@@ -155,15 +155,26 @@ export class GameRoom extends Room<{ state: GameState }> {
     console.log(`[GameRoom] ${player.name} joined (${client.sessionId})`);
   }
 
-  onLeave(client: Client, _code?: number) {
+  async onLeave(client: Client, _code?: number) {
     const player = this.state.players.get(client.sessionId);
-    if (player) {
-      console.log(`[GameRoom] ${player.name} left`);
-      player.connected = false;
+    if (!player) return;
 
-      if (this.state.phase === "lobby") {
-        this.state.players.delete(client.sessionId);
-      }
+    console.log(`[GameRoom] ${player.name} left`);
+    player.connected = false;
+
+    if (this.state.phase === "lobby") {
+      this.state.players.delete(client.sessionId);
+      return;
+    }
+
+    // Allow reconnection for 2 minutes during active game phases
+    try {
+      await this.allowReconnection(client, 120);
+      player.connected = true;
+      console.log(`[GameRoom] ${player.name} reconnected`);
+    } catch {
+      console.log(`[GameRoom] ${player.name} reconnection timed out`);
+      // Player stays in game state as disconnected — don't remove during active game
     }
   }
 
