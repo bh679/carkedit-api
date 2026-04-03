@@ -424,13 +424,19 @@ export function saveCardPlays(plays: CardPlay[]): void {
   transaction(plays);
 }
 
-export function getCardStats(): { mostPlayed: CardStat[]; leastPlayed: CardStat[]; highestWinRate: CardStat[] } {
+export function getCardStats(devFilter: 'all' | 'dev' | 'nodev' = 'all'): { mostPlayed: CardStat[]; leastPlayed: CardStat[]; highestWinRate: CardStat[] } {
+  let devWhere = '';
+  if (devFilter === 'dev') devWhere = 'WHERE g.is_dev = 1';
+  if (devFilter === 'nodev') devWhere = 'WHERE g.is_dev = 0';
+
   const allCards = db.prepare(`
-    SELECT card_id, card_text, card_deck,
+    SELECT cp.card_id, cp.card_text, cp.card_deck,
       COUNT(*) as play_count,
-      SUM(is_winner) as win_count
-    FROM card_plays
-    GROUP BY card_id, card_deck
+      SUM(cp.is_winner) as win_count
+    FROM card_plays cp
+    JOIN games g ON cp.game_id = g.id
+    ${devWhere}
+    GROUP BY cp.card_id, cp.card_deck
     ORDER BY play_count DESC
   `).all() as (CardStat & { win_count: number })[];
 
