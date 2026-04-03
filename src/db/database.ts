@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import type { GameResult, GameSummary, GameDetail, GameDetailCardPlay, GamePlayerResult, CardPlay, CardStat } from './types.js';
+import type { GameResult, GameSummary, GameDetail, GameDetailCardPlay, GamePlayerResult, CardPlay, CardStat, GameEvent, GameEventRow } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.resolve(__dirname, '../../data/games.db');
@@ -60,6 +60,23 @@ export function initDatabase(): void {
 
     CREATE INDEX IF NOT EXISTS idx_card_plays_card_id ON card_plays(card_id, card_deck);
     CREATE INDEX IF NOT EXISTS idx_card_plays_game_id ON card_plays(game_id);
+
+    CREATE TABLE IF NOT EXISTS game_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      game_id TEXT,
+      room_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      actor_session_id TEXT,
+      actor_name TEXT,
+      phase TEXT,
+      round INTEGER,
+      data_json TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_game_events_room_id ON game_events(room_id);
+    CREATE INDEX IF NOT EXISTS idx_game_events_game_id ON game_events(game_id);
+    CREATE INDEX IF NOT EXISTS idx_game_events_type ON game_events(event_type);
   `);
 
   // Migrate: add new columns if they don't exist (for existing DBs)
@@ -234,4 +251,39 @@ export function getCardStats(): { mostPlayed: CardStat[]; leastPlayed: CardStat[
   const highestWinRate = allCards.filter(c => c.play_count >= 3).sort((a, b) => b.win_rate - a.win_rate).slice(0, 20);
 
   return { mostPlayed, leastPlayed, highestWinRate };
+}
+
+export function saveGameEvent(event: GameEvent): void {
+  db.prepare(`
+    INSERT INTO game_events (game_id, room_id, event_type, actor_session_id, actor_name, phase, round, data_json, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    event.game_id ?? null,
+    event.room_id,
+    event.event_type,
+    event.actor_session_id ?? null,
+    event.actor_name ?? null,
+    event.phase ?? null,
+    event.round ?? null,
+    event.data_json ?? null,
+    event.created_at
+  );
+}
+
+export function backfillGameId(roomId: string, gameId: string): void {
+  db.prepare(`UPDATE game_events SET game_id = ? WHERE room_id = ? AND game_id IS NULL`).run(gameId, roomId);
+}
+
+export function getGameEvents(gameId: string): GameEventRow[] {
+  return db.prepare(`
+    SELECT id, game_id, room_id, event_type, actor_session_id, actor_name, phase, round, data_json, created_at
+    FROM game_events WHERE game_id = ? ORDER BY created_at ASC, id ASC
+  `).all(gameId) as GameEventRow[];
+}
+
+export function getGameEventsByRoom(roomId: string): GameEventRow[] {
+  return db.prepare(`
+    SELECT id, game_id, room_id, event_type, actor_session_id, actor_name, phase, round, data_json, created_at
+    FROM game_events WHERE room_id = ? ORDER BY created_at ASC, id ASC
+  `).all(roomId) as GameEventRow[];
 }

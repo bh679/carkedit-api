@@ -4,7 +4,7 @@ import { fileURLToPath } from "url";
 import express from "express";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
-import { initDatabase, saveGameResult, getRecentGames, getGameById, getStats, getCardStats } from "./db/database.js";
+import { initDatabase, saveGameResult, getRecentGames, getGameById, getStats, getCardStats, getGameEvents } from "./db/database.js";
 import type { GameResult } from "./db/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -139,6 +139,16 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Get game error:", err);
         res.status(500).json({ error: "Failed to retrieve game" });
+      }
+    });
+
+    app.get("/api/carkedit/games/:id/events", (req: any, res: any) => {
+      try {
+        const events = getGameEvents(req.params.id);
+        res.json({ game_id: req.params.id, events, total: events.length });
+      } catch (err) {
+        console.error("[CarkedIt API] Get game events error:", err);
+        res.status(500).json({ error: "Failed to retrieve game events" });
       }
     });
   },
