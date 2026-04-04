@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import type { GameResult, GameSummary, GameDetail, GameDetailCardPlay, GamePlayerResult, CardPlay, CardStat, IssueReport, GameEvent, GameEventRow } from './types.js';
+import { DIE_CARDS, LIVING_CARDS, BYE_CARDS } from '../data/cards.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.resolve(__dirname, '../../data/games.db');
@@ -429,7 +430,7 @@ export function getCardStats(devFilter: 'all' | 'dev' | 'nodev' = 'all'): { most
   if (devFilter === 'dev') devWhere = 'WHERE g.is_dev = 1';
   if (devFilter === 'nodev') devWhere = 'WHERE g.is_dev = 0';
 
-  const allCards = db.prepare(`
+  const playedCards = db.prepare(`
     SELECT cp.card_id, cp.card_text, cp.card_deck,
       COUNT(*) as play_count,
       SUM(cp.is_winner) as win_count
@@ -437,16 +438,44 @@ export function getCardStats(devFilter: 'all' | 'dev' | 'nodev' = 'all'): { most
     JOIN games g ON cp.game_id = g.id
     ${devWhere}
     GROUP BY cp.card_id, cp.card_deck
-    ORDER BY play_count DESC
   `).all() as (CardStat & { win_count: number })[];
 
-  for (const card of allCards) {
-    card.win_rate = card.play_count > 0 ? Math.round((card.win_count / card.play_count) * 100) : 0;
+  // Build lookup of played cards keyed by "deck:id"
+  const playedMap = new Map<string, CardStat & { win_count: number }>();
+  for (const card of playedCards) {
+    playedMap.set(`${card.card_deck}:${card.card_id}`, card);
   }
 
-  const mostPlayed = allCards.slice(0, 20);
-  const leastPlayed = [...allCards].sort((a, b) => a.play_count - b.play_count).slice(0, 20);
-  const highestWinRate = allCards.filter(c => c.play_count >= 3).sort((a, b) => b.win_rate - a.win_rate).slice(0, 20);
+  // Merge all source cards with play data (unplayed cards get zeros)
+  const deckEntries: { cards: typeof DIE_CARDS; deck: string }[] = [
+    { cards: DIE_CARDS, deck: 'die' },
+    { cards: LIVING_CARDS, deck: 'living' },
+    { cards: BYE_CARDS, deck: 'bye' },
+  ];
+
+  const allCards: CardStat[] = [];
+  for (const { cards, deck } of deckEntries) {
+    for (const c of cards) {
+      const key = `${deck}:${String(c.id)}`;
+      const played = playedMap.get(key);
+      if (played) {
+        played.win_rate = played.play_count > 0 ? Math.round((played.win_count / played.play_count) * 100) : 0;
+        allCards.push(played);
+        playedMap.delete(key);
+      } else {
+        allCards.push({ card_id: String(c.id), card_text: c.text, card_deck: deck, play_count: 0, win_count: 0, win_rate: 0 });
+      }
+    }
+  }
+  // Include any played cards not in the source data (e.g. removed cards)
+  for (const card of playedMap.values()) {
+    card.win_rate = card.play_count > 0 ? Math.round((card.win_count / card.play_count) * 100) : 0;
+    allCards.push(card);
+  }
+
+  const mostPlayed = [...allCards].sort((a, b) => b.play_count - a.play_count);
+  const leastPlayed = [...allCards].sort((a, b) => a.play_count - b.play_count);
+  const highestWinRate = allCards.filter(c => c.play_count >= 3).sort((a, b) => b.win_rate - a.win_rate);
 
   return { mostPlayed, leastPlayed, highestWinRate };
 }
