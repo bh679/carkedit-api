@@ -473,8 +473,8 @@ export function getCardStats(devFilter: 'all' | 'dev' | 'nodev' = 'all'): { most
     allCards.push(card);
   }
 
-  const mostPlayed = [...allCards].sort((a, b) => b.play_count - a.play_count);
-  const leastPlayed = [...allCards].sort((a, b) => a.play_count - b.play_count);
+  const mostPlayed = [...allCards].sort((a, b) => b.play_count - a.play_count || b.win_rate - a.win_rate);
+  const leastPlayed = [...allCards].sort((a, b) => a.play_count - b.play_count || a.win_rate - b.win_rate);
   const highestWinRate = allCards.filter(c => c.play_count >= 3).sort((a, b) => b.win_rate - a.win_rate);
 
   return { mostPlayed, leastPlayed, highestWinRate };
