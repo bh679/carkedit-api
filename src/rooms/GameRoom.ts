@@ -9,8 +9,8 @@ import { handleRevealDie, handleEndDieTurn } from "../phases/DiePhase.js";
 import { handleSubmitCard, handleRevealSubmission, handleEndConvinceTurn, handleSelectWinner, handleNextRound } from "../phases/LivingPhase.js";
 import { handleStartEulogyRound, handleSelectEulogist, handleConfirmEulogists, handleDoneEulogy, handlePickBestEulogy, handleNextWildcard, handleRevealWinner } from "../phases/EulogyPhase.js";
 import { ROOM_CODE_WORDS } from "./roomWords.js";
-import { saveGameResult, saveCardPlays, saveGameEvent, backfillGameId, createLiveGame, updateLiveGame, completeLiveGame, abandonGame } from "../db/database.js";
-import type { GameResult, CardPlay, GameEvent } from "../db/types.js";
+import { saveGameResult, saveCardPlays, saveCardDraws, saveGameEvent, backfillGameId, createLiveGame, updateLiveGame, completeLiveGame, abandonGame } from "../db/database.js";
+import type { GameResult, CardPlay, CardDraw, GameEvent } from "../db/types.js";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -52,6 +52,10 @@ export class GameRoom extends Room<{ state: GameState }> {
           to: this.state.phase,
         });
         this._previousPhase = this.state.phase;
+        // Capture card draws when hands are dealt (phase just transitioned to submit)
+        if (this._gameId && (this.state.phase === "die_phase" || this.state.phase === "living_submit" || this.state.phase === "bye_submit")) {
+          this.captureCardDraws();
+        }
         if (this._gameId) {
           try { updateLiveGame(this._gameId, { status: this.state.phase }); } catch {}
         }
@@ -496,6 +500,33 @@ export class GameRoom extends Room<{ state: GameState }> {
       }
     } catch (err) {
       console.error("[GameRoom] Failed to capture card plays:", err);
+    }
+  }
+
+  private captureCardDraws() {
+    try {
+      const phase = this.state.phase === "die_phase" ? "die"
+        : this.state.phase === "living_submit" ? "living"
+        : "bye";
+      const draws: CardDraw[] = [];
+
+      this.state.players.forEach((player) => {
+        for (let i = 0; i < player.hand.length; i++) {
+          const card = player.hand[i];
+          draws.push({
+            game_id: this._gameId!,
+            phase,
+            card_id: String(card.id),
+            card_deck: card.deck,
+          });
+        }
+      });
+
+      if (draws.length > 0) {
+        saveCardDraws(draws);
+      }
+    } catch (err) {
+      console.error("[GameRoom] Failed to capture card draws:", err);
     }
   }
 
