@@ -302,8 +302,8 @@ export function getGameById(id: string): GameDetail | null {
     SELECT player_name, score, rank FROM game_players WHERE game_id = ? ORDER BY rank ASC
   `).all(id) as GamePlayerResult[];
 
-  // For live games with no player results yet, derive from game_events
-  if (game.players.length === 0 && game.live_status === 'live') {
+  // For live/abandoned games with no player results yet, derive from game_events
+  if (game.players.length === 0 && (game.live_status === 'live' || game.live_status === 'abandoned')) {
     // Try game_started event first (has definitive player list and settings)
     const startedEvent = db.prepare(`
       SELECT data_json FROM game_events WHERE game_id = ? AND event_type = 'game_started' LIMIT 1
