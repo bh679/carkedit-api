@@ -450,7 +450,7 @@ export function saveCardDraws(draws: CardDraw[]): void {
   transaction(draws);
 }
 
-export function getCardStats(devFilter: 'all' | 'dev' | 'nodev' = 'all'): { mostPlayed: CardStat[]; leastPlayed: CardStat[]; highestWinRate: CardStat[] } {
+export function getCardStats(devFilter: 'all' | 'dev' | 'nodev' = 'all'): { cards: CardStat[] } {
   let devWherePlay = '';
   let devWhereDraw = '';
   if (devFilter === 'dev') { devWherePlay = 'WHERE g.is_dev = 1'; devWhereDraw = 'WHERE g2.is_dev = 1'; }
@@ -479,7 +479,6 @@ export function getCardStats(devFilter: 'all' | 'dev' | 'nodev' = 'all'): { most
     JOIN games g ON cp.game_id = g.id
     ${devWherePlay}
     GROUP BY cp.card_id, cp.card_deck
-    ORDER BY play_count DESC
   `).all() as (CardStat & { win_count: number })[];
 
   // Merge draw counts into played cards
@@ -490,15 +489,14 @@ export function getCardStats(devFilter: 'all' | 'dev' | 'nodev' = 'all'): { most
     card.play_rate = card.draw_count > 0 ? Math.round((card.play_count / card.draw_count) * 100) : 0;
   }
 
-  // Build list of drawn-but-never-played cards
+  // Add drawn-but-never-played cards
   const playedKeys = new Set(playedCards.map(c => `${c.card_id}|${c.card_deck}`));
-  const drawnOnly: CardStat[] = [];
   for (const d of drawCounts) {
     const key = `${d.card_id}|${d.card_deck}`;
     if (!playedKeys.has(key)) {
-      drawnOnly.push({
+      playedCards.push({
         card_id: d.card_id,
-        card_text: d.card_id, // fallback — no text available from draws
+        card_text: d.card_id,
         card_deck: d.card_deck,
         play_count: 0,
         win_count: 0,
@@ -509,22 +507,10 @@ export function getCardStats(devFilter: 'all' | 'dev' | 'nodev' = 'all'): { most
     }
   }
 
-  // mostPlayed: sort by play_rate descending (cards with draw data first, then by play_count)
-  const allWithDraws = playedCards.filter(c => c.draw_count > 0);
-  const withoutDraws = playedCards.filter(c => c.draw_count === 0);
-  const mostPlayed = [...allWithDraws].sort((a, b) => b.play_rate - a.play_rate || b.play_count - a.play_count)
-    .concat(withoutDraws)
-    .slice(0, 20);
+  // Default sort: play_rate desc, play_count desc, win_rate desc
+  playedCards.sort((a, b) => b.play_rate - a.play_rate || b.play_count - a.play_count || b.win_rate - a.win_rate);
 
-  // leastPlayed: drawn-but-never-played first, then lowest play_rate
-  const leastPlayed = [...drawnOnly, ...allWithDraws]
-    .sort((a, b) => a.play_rate - b.play_rate || a.play_count - b.play_count)
-    .slice(0, 20);
-
-  // highestWinRate: unchanged logic
-  const highestWinRate = playedCards.filter(c => c.play_count >= 3).sort((a, b) => b.win_rate - a.win_rate).slice(0, 20);
-
-  return { mostPlayed, leastPlayed, highestWinRate };
+  return { cards: playedCards };
 }
 
 export function saveIssueReport(report: IssueReport): string {
