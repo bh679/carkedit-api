@@ -1,6 +1,6 @@
 {
   "name": "carkedit-api",
-  "version": "0.01.0015",
+  "version": "0.01.0016",
   "description": "CarkedIt multiplayer card game server",
   "type": "module",
   "main": "src/index.ts",

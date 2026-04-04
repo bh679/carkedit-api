@@ -20,6 +20,15 @@ const server = defineServer({
   },
   express: (app) => {
     app.use(express.json());
+
+    // Force browsers to revalidate HTML pages (picks up new versioned asset URLs)
+    app.use((req, res, next) => {
+      if (req.path.endsWith('.html') || req.path === '/') {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      }
+      next();
+    });
+
     app.use(express.static(clientDir));
 
     app.get("/api/carkedit/health", (_req: any, res: any) => {
