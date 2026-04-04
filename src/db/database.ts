@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import type { GameResult, GameSummary, GameDetail, GameDetailCardPlay, GamePlayerResult, CardPlay, CardDraw, CardStat, IssueReport, GameEvent, GameEventRow } from './types.js';
+import { DIE_CARDS, LIVING_CARDS, BYE_CARDS } from '../data/cards.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.resolve(__dirname, '../../data/games.db');
@@ -456,7 +457,7 @@ export function getCardStats(devFilter: 'all' | 'dev' | 'nodev' = 'all'): { card
   if (devFilter === 'dev') { devWherePlay = 'WHERE g.is_dev = 1'; devWhereDraw = 'WHERE g2.is_dev = 1'; }
   if (devFilter === 'nodev') { devWherePlay = 'WHERE g.is_dev = 0'; devWhereDraw = 'WHERE g2.is_dev = 0'; }
 
-  // Build draw counts subquery
+  // Build draw counts
   const drawCounts = db.prepare(`
     SELECT d.card_id, d.card_deck, COUNT(*) as draw_count
     FROM card_draws d
@@ -467,10 +468,10 @@ export function getCardStats(devFilter: 'all' | 'dev' | 'nodev' = 'all'): { card
 
   const drawMap = new Map<string, number>();
   for (const d of drawCounts) {
-    drawMap.set(`${d.card_id}|${d.card_deck}`, d.draw_count);
+    drawMap.set(`${d.card_deck}:${d.card_id}`, d.draw_count);
   }
 
-  // Get play counts (cards that were actually played)
+  // Get play counts
   const playedCards = db.prepare(`
     SELECT cp.card_id, cp.card_text, cp.card_deck,
       COUNT(*) as play_count,
@@ -481,36 +482,50 @@ export function getCardStats(devFilter: 'all' | 'dev' | 'nodev' = 'all'): { card
     GROUP BY cp.card_id, cp.card_deck
   `).all() as (CardStat & { win_count: number })[];
 
-  // Merge draw counts into played cards
+  // Build lookup of played cards keyed by "deck:id"
+  const playedMap = new Map<string, CardStat & { win_count: number }>();
   for (const card of playedCards) {
-    const key = `${card.card_id}|${card.card_deck}`;
-    card.draw_count = drawMap.get(key) || 0;
-    card.win_rate = card.play_count > 0 ? Math.round((card.win_count / card.play_count) * 100) : 0;
-    card.play_rate = card.draw_count > 0 ? Math.round((card.play_count / card.draw_count) * 100) : 0;
+    playedMap.set(`${card.card_deck}:${card.card_id}`, card);
   }
 
-  // Add drawn-but-never-played cards
-  const playedKeys = new Set(playedCards.map(c => `${c.card_id}|${c.card_deck}`));
-  for (const d of drawCounts) {
-    const key = `${d.card_id}|${d.card_deck}`;
-    if (!playedKeys.has(key)) {
-      playedCards.push({
-        card_id: d.card_id,
-        card_text: d.card_id,
-        card_deck: d.card_deck,
-        play_count: 0,
-        win_count: 0,
-        win_rate: 0,
-        draw_count: d.draw_count,
-        play_rate: 0,
-      });
+  // Merge all source cards with play + draw data (unplayed cards get zeros)
+  const deckEntries: { cards: typeof DIE_CARDS; deck: string }[] = [
+    { cards: DIE_CARDS, deck: 'die' },
+    { cards: LIVING_CARDS, deck: 'living' },
+    { cards: BYE_CARDS, deck: 'bye' },
+  ];
+
+  const allCards: CardStat[] = [];
+  for (const { cards, deck } of deckEntries) {
+    for (const c of cards) {
+      const key = `${deck}:${String(c.id)}`;
+      const played = playedMap.get(key);
+      const dc = drawMap.get(key) || 0;
+      if (played) {
+        played.draw_count = dc;
+        played.win_rate = played.play_count > 0 ? Math.round((played.win_count / played.play_count) * 100) : 0;
+        played.play_rate = dc > 0 ? Math.round((played.play_count / dc) * 100) : 0;
+        allCards.push(played);
+        playedMap.delete(key);
+      } else {
+        allCards.push({ card_id: String(c.id), card_text: c.text, card_deck: deck, play_count: 0, win_count: 0, win_rate: 0, draw_count: dc, play_rate: 0 });
+      }
     }
+  }
+  // Include any played cards not in the source data (e.g. removed cards)
+  for (const card of playedMap.values()) {
+    const key = `${card.card_deck}:${card.card_id}`;
+    const dc = drawMap.get(key) || 0;
+    card.draw_count = dc;
+    card.win_rate = card.play_count > 0 ? Math.round((card.win_count / card.play_count) * 100) : 0;
+    card.play_rate = dc > 0 ? Math.round((card.play_count / dc) * 100) : 0;
+    allCards.push(card);
   }
 
   // Default sort: play_rate desc, play_count desc, win_rate desc
-  playedCards.sort((a, b) => b.play_rate - a.play_rate || b.play_count - a.play_count || b.win_rate - a.win_rate);
+  allCards.sort((a, b) => b.play_rate - a.play_rate || b.play_count - a.play_count || b.win_rate - a.win_rate);
 
-  return { cards: playedCards };
+  return { cards: allCards };
 }
 
 export function saveIssueReport(report: IssueReport): string {
