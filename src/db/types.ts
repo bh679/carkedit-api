@@ -77,6 +77,13 @@ export interface CardPlay {
   is_winner: boolean;
 }
 
+export interface CardDraw {
+  game_id: string;
+  phase: string;
+  card_id: string;
+  card_deck: string;
+}
+
 export interface CardStat {
   card_id: string;
   card_text: string;
@@ -84,6 +91,8 @@ export interface CardStat {
   play_count: number;
   win_count: number;
   win_rate: number;
+  draw_count: number;
+  play_rate: number;
 }
 
 export interface IssueReport {

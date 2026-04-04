@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import type { GameResult, GameSummary, GameDetail, GameDetailCardPlay, GamePlayerResult, CardPlay, CardStat, IssueReport, GameEvent, GameEventRow } from './types.js';
+import type { GameResult, GameSummary, GameDetail, GameDetailCardPlay, GamePlayerResult, CardPlay, CardDraw, CardStat, IssueReport, GameEvent, GameEventRow } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.resolve(__dirname, '../../data/games.db');
@@ -62,6 +62,17 @@ export function initDatabase(): void {
 
     CREATE INDEX IF NOT EXISTS idx_card_plays_card_id ON card_plays(card_id, card_deck);
     CREATE INDEX IF NOT EXISTS idx_card_plays_game_id ON card_plays(game_id);
+
+    CREATE TABLE IF NOT EXISTS card_draws (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      game_id TEXT NOT NULL REFERENCES games(id),
+      phase TEXT NOT NULL,
+      card_id TEXT NOT NULL,
+      card_deck TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_card_draws_card_id ON card_draws(card_id, card_deck);
+    CREATE INDEX IF NOT EXISTS idx_card_draws_game_id ON card_draws(game_id);
 
     CREATE TABLE IF NOT EXISTS issue_reports (
       id TEXT PRIMARY KEY,
@@ -424,29 +435,94 @@ export function saveCardPlays(plays: CardPlay[]): void {
   transaction(plays);
 }
 
-export function getCardStats(devFilter: 'all' | 'dev' | 'nodev' = 'all'): { mostPlayed: CardStat[]; leastPlayed: CardStat[]; highestWinRate: CardStat[] } {
-  let devWhere = '';
-  if (devFilter === 'dev') devWhere = 'WHERE g.is_dev = 1';
-  if (devFilter === 'nodev') devWhere = 'WHERE g.is_dev = 0';
+export function saveCardDraws(draws: CardDraw[]): void {
+  const insert = db.prepare(`
+    INSERT INTO card_draws (game_id, phase, card_id, card_deck)
+    VALUES (?, ?, ?, ?)
+  `);
 
-  const allCards = db.prepare(`
+  const transaction = db.transaction((items: CardDraw[]) => {
+    for (const d of items) {
+      insert.run(d.game_id, d.phase, d.card_id, d.card_deck);
+    }
+  });
+
+  transaction(draws);
+}
+
+export function getCardStats(devFilter: 'all' | 'dev' | 'nodev' = 'all'): { mostPlayed: CardStat[]; leastPlayed: CardStat[]; highestWinRate: CardStat[] } {
+  let devWherePlay = '';
+  let devWhereDraw = '';
+  if (devFilter === 'dev') { devWherePlay = 'WHERE g.is_dev = 1'; devWhereDraw = 'WHERE g2.is_dev = 1'; }
+  if (devFilter === 'nodev') { devWherePlay = 'WHERE g.is_dev = 0'; devWhereDraw = 'WHERE g2.is_dev = 0'; }
+
+  // Build draw counts subquery
+  const drawCounts = db.prepare(`
+    SELECT d.card_id, d.card_deck, COUNT(*) as draw_count
+    FROM card_draws d
+    JOIN games g2 ON d.game_id = g2.id
+    ${devWhereDraw}
+    GROUP BY d.card_id, d.card_deck
+  `).all() as { card_id: string; card_deck: string; draw_count: number }[];
+
+  const drawMap = new Map<string, number>();
+  for (const d of drawCounts) {
+    drawMap.set(`${d.card_id}|${d.card_deck}`, d.draw_count);
+  }
+
+  // Get play counts (cards that were actually played)
+  const playedCards = db.prepare(`
     SELECT cp.card_id, cp.card_text, cp.card_deck,
       COUNT(*) as play_count,
       SUM(cp.is_winner) as win_count
     FROM card_plays cp
     JOIN games g ON cp.game_id = g.id
-    ${devWhere}
+    ${devWherePlay}
     GROUP BY cp.card_id, cp.card_deck
     ORDER BY play_count DESC
   `).all() as (CardStat & { win_count: number })[];
 
-  for (const card of allCards) {
+  // Merge draw counts into played cards
+  for (const card of playedCards) {
+    const key = `${card.card_id}|${card.card_deck}`;
+    card.draw_count = drawMap.get(key) || 0;
     card.win_rate = card.play_count > 0 ? Math.round((card.win_count / card.play_count) * 100) : 0;
+    card.play_rate = card.draw_count > 0 ? Math.round((card.play_count / card.draw_count) * 100) : 0;
   }
 
-  const mostPlayed = allCards.slice(0, 20);
-  const leastPlayed = [...allCards].sort((a, b) => a.play_count - b.play_count).slice(0, 20);
-  const highestWinRate = allCards.filter(c => c.play_count >= 3).sort((a, b) => b.win_rate - a.win_rate).slice(0, 20);
+  // Build list of drawn-but-never-played cards
+  const playedKeys = new Set(playedCards.map(c => `${c.card_id}|${c.card_deck}`));
+  const drawnOnly: CardStat[] = [];
+  for (const d of drawCounts) {
+    const key = `${d.card_id}|${d.card_deck}`;
+    if (!playedKeys.has(key)) {
+      drawnOnly.push({
+        card_id: d.card_id,
+        card_text: d.card_id, // fallback — no text available from draws
+        card_deck: d.card_deck,
+        play_count: 0,
+        win_count: 0,
+        win_rate: 0,
+        draw_count: d.draw_count,
+        play_rate: 0,
+      });
+    }
+  }
+
+  // mostPlayed: sort by play_rate descending (cards with draw data first, then by play_count)
+  const allWithDraws = playedCards.filter(c => c.draw_count > 0);
+  const withoutDraws = playedCards.filter(c => c.draw_count === 0);
+  const mostPlayed = [...allWithDraws].sort((a, b) => b.play_rate - a.play_rate || b.play_count - a.play_count)
+    .concat(withoutDraws)
+    .slice(0, 20);
+
+  // leastPlayed: drawn-but-never-played first, then lowest play_rate
+  const leastPlayed = [...drawnOnly, ...allWithDraws]
+    .sort((a, b) => a.play_rate - b.play_rate || a.play_count - b.play_count)
+    .slice(0, 20);
+
+  // highestWinRate: unchanged logic
+  const highestWinRate = playedCards.filter(c => c.play_count >= 3).sort((a, b) => b.win_rate - a.win_rate).slice(0, 20);
 
   return { mostPlayed, leastPlayed, highestWinRate };
 }
