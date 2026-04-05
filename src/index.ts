@@ -6,7 +6,7 @@ import express from "express";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
 import { initDatabase, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports } from "./db/database.js";
-import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase } from "./db/users.js";
+import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag } from "./db/users.js";
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard } from "./db/packs.js";
 import { optionalAuth, requireAuth, requireAdmin, setFirebaseAvailable } from "./middleware/auth.js";
 import type { GameResult, IssueReport } from "./db/types.js";
@@ -257,6 +257,46 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Get current user error:", err);
         res.status(500).json({ error: "Failed to retrieve current user" });
+      }
+    });
+
+    // Bootstrap: promote caller to admin if no admins exist yet
+    app.post("/api/carkedit/admin/bootstrap", requireAuth(), (req: any, res: any) => {
+      try {
+        if (hasAnyAdmin()) {
+          return res.status(403).json({ error: "Admin already exists. Use the admin panel to manage users." });
+        }
+        const user = setAdminFlag(req.localUser!.id, true);
+        res.json(user);
+      } catch (err) {
+        console.error("[CarkedIt API] Bootstrap admin error:", err);
+        res.status(500).json({ error: "Failed to bootstrap admin" });
+      }
+    });
+
+    // List all users (admin only)
+    app.get("/api/carkedit/users", requireAdmin(), (_req: any, res: any) => {
+      try {
+        res.json({ users: listUsers() });
+      } catch (err) {
+        console.error("[CarkedIt API] List users error:", err);
+        res.status(500).json({ error: "Failed to list users" });
+      }
+    });
+
+    // Toggle admin flag (admin only)
+    app.patch("/api/carkedit/users/:id/admin", requireAdmin(), (req: any, res: any) => {
+      try {
+        const { is_admin } = req.body;
+        if (typeof is_admin !== 'boolean' && typeof is_admin !== 'number') {
+          return res.status(400).json({ error: "is_admin (boolean) is required" });
+        }
+        const user = setAdminFlag(req.params.id, !!is_admin);
+        if (!user) return res.status(404).json({ error: "User not found" });
+        res.json(user);
+      } catch (err) {
+        console.error("[CarkedIt API] Set admin error:", err);
+        res.status(500).json({ error: "Failed to update admin status" });
       }
     });
 
