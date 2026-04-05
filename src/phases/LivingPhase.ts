@@ -34,7 +34,7 @@ export function handleSubmitCard(state: GameState, client: Client, cardIndex: nu
 
   // Check if all non-Living-Dead players have submitted
   if (allPlayersSubmitted(state)) {
-    transitionToConvince(state);
+    transitionToReveal(state);
   }
 }
 
@@ -247,8 +247,26 @@ function allPlayersSubmitted(state: GameState): boolean {
   return allSubmitted;
 }
 
+function transitionToReveal(state: GameState): void {
+  console.log(`[LivingPhase] All cards submitted — entering reveal phase`);
+
+  if (state.phase === "living_submit") {
+    state.phase = "living_reveal";
+  } else {
+    state.phase = "bye_reveal";
+  }
+}
+
+export function handleRevealComplete(state: GameState, client: Client): void {
+  // Validate phase — idempotent guard (multiple clients may send this)
+  const validPhases = ["living_reveal", "bye_reveal"];
+  if (!validPhases.includes(state.phase)) return;
+
+  transitionToConvince(state);
+}
+
 function transitionToConvince(state: GameState): void {
-  console.log(`[LivingPhase] All cards submitted — entering convincing phase`);
+  console.log(`[LivingPhase] Entering convincing phase`);
 
   // Find first non-Living-Dead player in turnOrder
   const firstConvincer = getFirstNonLivingDead(state);
@@ -256,7 +274,7 @@ function transitionToConvince(state: GameState): void {
 
   state.convincingTurn = firstConvincer;
 
-  if (state.phase === "living_submit") {
+  if (state.phase === "living_reveal") {
     state.phase = "living_convince";
   } else {
     state.phase = "bye_convince";

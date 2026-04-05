@@ -6,7 +6,7 @@ import { shuffle, createDeck } from "../utils/deck.js";
 import { computeDodTurnOrder } from "../utils/turnOrder.js";
 import { DIE_CARDS, LIVING_CARDS, BYE_CARDS } from "../data/cards.js";
 import { handleRevealDie, handleEndDieTurn } from "../phases/DiePhase.js";
-import { handleSubmitCard, handleRevealSubmission, handleEndConvinceTurn, handleSelectWinner, handleNextRound } from "../phases/LivingPhase.js";
+import { handleSubmitCard, handleRevealComplete, handleRevealSubmission, handleEndConvinceTurn, handleSelectWinner, handleNextRound } from "../phases/LivingPhase.js";
 import { handleStartEulogyRound, handleSelectEulogist, handleConfirmEulogists, handleDoneEulogy, handlePickBestEulogy, handleNextWildcard, handleRevealWinner } from "../phases/EulogyPhase.js";
 import { ROOM_CODE_WORDS } from "./roomWords.js";
 import { saveGameResult, saveCardPlays, saveCardDraws, saveGameEvent, backfillGameId, createLiveGame, updateLiveGame, completeLiveGame, abandonGame } from "../db/database.js";
@@ -142,6 +142,11 @@ export class GameRoom extends Room<{ state: GameState }> {
     this.onMessage("submit_card", (client, data: { cardIndex: number }) => {
       this.logEvent(client, "card_submitted", { cardIndex: data.cardIndex });
       handleSubmitCard(this.state, client, data.cardIndex);
+    });
+
+    this.onMessage("reveal_complete", (client) => {
+      this.logEvent(client, "reveal_complete");
+      handleRevealComplete(this.state, client);
     });
 
     this.onMessage("reveal_submission", (client) => {
