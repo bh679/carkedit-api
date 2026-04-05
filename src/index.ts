@@ -8,7 +8,7 @@ import { GameRoom } from "./rooms/GameRoom.js";
 import { initDatabase, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase } from "./db/users.js";
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard } from "./db/packs.js";
-import { optionalAuth, requireAuth, setFirebaseAvailable } from "./middleware/auth.js";
+import { optionalAuth, requireAuth, requireAdmin, setFirebaseAvailable } from "./middleware/auth.js";
 import type { GameResult, IssueReport } from "./db/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -130,7 +130,7 @@ const server = defineServer({
       }
     });
 
-    app.get("/api/carkedit/games/stats", (_req: any, res: any) => {
+    app.get("/api/carkedit/games/stats", requireAdmin(), (_req: any, res: any) => {
       try {
         const since = _req.query.since as string | undefined;
         res.json(since ? getStatsByPeriod(since) : getStats());
@@ -140,7 +140,7 @@ const server = defineServer({
       }
     });
 
-    app.get("/api/carkedit/games/stats/live", async (_req: any, res: any) => {
+    app.get("/api/carkedit/games/stats/live", requireAdmin(), async (_req: any, res: any) => {
       try {
         const rooms = await matchMaker.query({ name: "game" });
         const activeRooms = rooms.filter((r: any) => r.clients > 0);
@@ -153,7 +153,7 @@ const server = defineServer({
       }
     });
 
-    app.get("/api/carkedit/cards/stats", (_req: any, res: any) => {
+    app.get("/api/carkedit/cards/stats", requireAdmin(), (_req: any, res: any) => {
       try {
         const devFilter = (['all', 'dev', 'nodev'].includes(_req.query.dev) ? _req.query.dev : 'all') as 'all' | 'dev' | 'nodev';
         res.json(getCardStats(devFilter));
@@ -163,7 +163,7 @@ const server = defineServer({
       }
     });
 
-    app.get("/api/carkedit/games", (_req: any, res: any) => {
+    app.get("/api/carkedit/games", requireAdmin(), (_req: any, res: any) => {
       try {
         const result = getRecentGames({
           limit: Math.min(parseInt(_req.query.limit as string) || 20, 100),
@@ -181,7 +181,7 @@ const server = defineServer({
       }
     });
 
-    app.get("/api/carkedit/games/:id", (req: any, res: any) => {
+    app.get("/api/carkedit/games/:id", requireAdmin(), (req: any, res: any) => {
       try {
         const game = getGameById(req.params.id);
         if (!game) return res.status(404).json({ error: "Game not found" });
@@ -192,7 +192,7 @@ const server = defineServer({
       }
     });
 
-    app.get("/api/carkedit/games/:id/events", (req: any, res: any) => {
+    app.get("/api/carkedit/games/:id/events", requireAdmin(), (req: any, res: any) => {
       try {
         const events = getGameEvents(req.params.id);
         res.json({ game_id: req.params.id, events, total: events.length });
@@ -238,7 +238,7 @@ const server = defineServer({
       }
     });
 
-    app.get("/api/carkedit/issues", (_req: any, res: any) => {
+    app.get("/api/carkedit/issues", requireAdmin(), (_req: any, res: any) => {
       try {
         const limit = Math.min(parseInt(_req.query.limit as string) || 50, 200);
         const offset = parseInt(_req.query.offset as string) || 0;
@@ -250,6 +250,15 @@ const server = defineServer({
     });
 
     // --- User endpoints ---
+
+    app.get("/api/carkedit/users/me", requireAuth(), (req: any, res: any) => {
+      try {
+        res.json(req.localUser);
+      } catch (err) {
+        console.error("[CarkedIt API] Get current user error:", err);
+        res.status(500).json({ error: "Failed to retrieve current user" });
+      }
+    });
 
     app.post("/api/carkedit/users", (req: any, res: any) => {
       try {

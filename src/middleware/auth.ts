@@ -77,3 +77,38 @@ export function requireAuth() {
     }
   };
 }
+
+/**
+ * Admin auth — requires valid token AND is_admin flag on the user record.
+ */
+export function requireAdmin() {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    if (!firebaseAuthAvailable) {
+      return res.status(503).json({ error: 'Authentication service not configured' });
+    }
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    try {
+      const { getAuth } = await import('firebase-admin/auth');
+      const token = authHeader.split('Bearer ')[1];
+      const decoded = await getAuth().verifyIdToken(token);
+      req.firebaseUser = {
+        uid: decoded.uid,
+        email: decoded.email,
+        name: decoded.name,
+        picture: decoded.picture,
+      };
+      req.localUser = upsertUserFromFirebase(req.firebaseUser);
+      if (!req.localUser?.is_admin) {
+        return res.status(403).json({ error: 'Admin access required' });
+      }
+      next();
+    } catch (err: any) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+  };
+}
