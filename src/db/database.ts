@@ -10,6 +10,10 @@ const DB_PATH = path.resolve(__dirname, '../../data/games.db');
 
 let db: Database.Database;
 
+export function getDb(): Database.Database {
+  return db;
+}
+
 export function initDatabase(): void {
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
   db = new Database(DB_PATH);
@@ -111,6 +115,42 @@ export function initDatabase(): void {
     CREATE INDEX IF NOT EXISTS idx_game_events_room_id ON game_events(room_id);
     CREATE INDEX IF NOT EXISTS idx_game_events_game_id ON game_events(game_id);
     CREATE INDEX IF NOT EXISTS idx_game_events_type ON game_events(event_type);
+
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      firebase_uid TEXT UNIQUE,
+      display_name TEXT NOT NULL,
+      email TEXT,
+      avatar_url TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_users_firebase_uid ON users(firebase_uid);
+
+    CREATE TABLE IF NOT EXISTS expansion_packs (
+      id TEXT PRIMARY KEY,
+      creator_id TEXT NOT NULL REFERENCES users(id),
+      title TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      visibility TEXT NOT NULL DEFAULT 'private' CHECK(visibility IN ('private', 'public')),
+      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'published')),
+      version INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_packs_creator ON expansion_packs(creator_id);
+    CREATE INDEX IF NOT EXISTS idx_packs_visibility_status ON expansion_packs(visibility, status);
+
+    CREATE TABLE IF NOT EXISTS expansion_cards (
+      id TEXT PRIMARY KEY,
+      pack_id TEXT NOT NULL REFERENCES expansion_packs(id) ON DELETE CASCADE,
+      deck_type TEXT NOT NULL CHECK(deck_type IN ('die', 'live', 'bye')),
+      text TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_cards_pack ON expansion_cards(pack_id);
   `);
 
   // Migrate: add new columns if they don't exist (for existing DBs)

@@ -137,3 +137,39 @@ export interface GameEventRow {
   data_json: string | null;
   created_at: string;
 }
+
+export interface User {
+  id: string;
+  firebase_uid: string | null;
+  display_name: string;
+  email: string | null;
+  avatar_url: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExpansionPack {
+  id: string;
+  creator_id: string;
+  title: string;
+  description: string;
+  visibility: 'private' | 'public';
+  status: 'draft' | 'published';
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExpansionCard {
+  id: string;
+  pack_id: string;
+  deck_type: 'die' | 'live' | 'bye';
+  text: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PackWithCards extends ExpansionPack {
+  cards: ExpansionCard[];
+}
