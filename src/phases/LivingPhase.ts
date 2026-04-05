@@ -34,7 +34,7 @@ export function handleSubmitCard(state: GameState, client: Client, cardIndex: nu
 
   // Check if all non-Living-Dead players have submitted
   if (allPlayersSubmitted(state)) {
-    transitionToConvince(state);
+    transitionToReveal(state);
   }
 }
 
@@ -247,20 +247,37 @@ function allPlayersSubmitted(state: GameState): boolean {
   return allSubmitted;
 }
 
+function transitionToReveal(state: GameState): void {
+  console.log(`[LivingPhase] All cards submitted — entering reveal phase`);
+
+  if (state.phase === "living_submit") {
+    state.phase = "living_reveal";
+  } else {
+    state.phase = "bye_reveal";
+  }
+}
+
+export function handleRevealComplete(state: GameState, client: Client): void {
+  // Validate phase — idempotent guard (multiple clients may send this)
+  const validPhases = ["living_reveal", "bye_reveal"];
+  if (!validPhases.includes(state.phase)) return;
+
+  transitionToConvince(state);
+}
+
 function transitionToConvince(state: GameState): void {
-  console.log(`[LivingPhase] All cards submitted — entering convincing phase`);
+  const isLiving = state.phase === "living_reveal";
+  const isBye = state.phase === "bye_reveal";
+  if (!isLiving && !isBye) return; // safety net — only valid from reveal phases
+
+  console.log(`[LivingPhase] Entering convincing phase`);
 
   // Find first non-Living-Dead player in turnOrder
   const firstConvincer = getFirstNonLivingDead(state);
   if (!firstConvincer) return;
 
   state.convincingTurn = firstConvincer;
-
-  if (state.phase === "living_submit") {
-    state.phase = "living_convince";
-  } else {
-    state.phase = "bye_convince";
-  }
+  state.phase = isLiving ? "living_convince" : "bye_convince";
 }
 
 function transitionToSelect(state: GameState): void {
