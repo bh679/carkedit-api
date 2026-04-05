@@ -6,6 +6,8 @@ import express from "express";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
 import { initDatabase, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports } from "./db/database.js";
+import { createUser, getUserById } from "./db/users.js";
+import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard } from "./db/packs.js";
 import type { GameResult, IssueReport } from "./db/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -223,6 +225,154 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Get issue reports error:", err);
         res.status(500).json({ error: "Failed to retrieve issue reports" });
+      }
+    });
+
+    // --- User endpoints ---
+
+    app.post("/api/carkedit/users", (req: any, res: any) => {
+      try {
+        const { display_name, firebase_uid, email, avatar_url } = req.body;
+        if (!display_name || typeof display_name !== 'string' || display_name.trim().length === 0) {
+          return res.status(400).json({ error: "display_name is required" });
+        }
+        const user = createUser({ display_name: display_name.trim(), firebase_uid, email, avatar_url });
+        res.status(201).json(user);
+      } catch (err) {
+        console.error("[CarkedIt API] Create user error:", err);
+        res.status(500).json({ error: "Failed to create user" });
+      }
+    });
+
+    app.get("/api/carkedit/users/:id", (req: any, res: any) => {
+      try {
+        const user = getUserById(req.params.id);
+        if (!user) return res.status(404).json({ error: "User not found" });
+        res.json(user);
+      } catch (err) {
+        console.error("[CarkedIt API] Get user error:", err);
+        res.status(500).json({ error: "Failed to retrieve user" });
+      }
+    });
+
+    // --- Expansion Pack endpoints ---
+
+    app.post("/api/carkedit/packs", (req: any, res: any) => {
+      try {
+        const { creator_id, title, description } = req.body;
+        if (!creator_id || typeof creator_id !== 'string') {
+          return res.status(400).json({ error: "creator_id is required" });
+        }
+        if (!title || typeof title !== 'string' || title.trim().length === 0) {
+          return res.status(400).json({ error: "title is required" });
+        }
+        const pack = createPack({ creator_id, title: title.trim(), description });
+        res.status(201).json(pack);
+      } catch (err) {
+        console.error("[CarkedIt API] Create pack error:", err);
+        res.status(500).json({ error: "Failed to create pack" });
+      }
+    });
+
+    app.get("/api/carkedit/packs", (_req: any, res: any) => {
+      try {
+        const result = listPacks({
+          creator_id: _req.query.creator_id as string || undefined,
+          visibility: _req.query.visibility as string || undefined,
+          status: _req.query.status as string || undefined,
+          limit: Math.min(parseInt(_req.query.limit as string) || 50, 100),
+          offset: parseInt(_req.query.offset as string) || 0,
+        });
+        res.json(result);
+      } catch (err) {
+        console.error("[CarkedIt API] List packs error:", err);
+        res.status(500).json({ error: "Failed to retrieve packs" });
+      }
+    });
+
+    app.get("/api/carkedit/packs/:id", (req: any, res: any) => {
+      try {
+        const pack = getPackById(req.params.id);
+        if (!pack) return res.status(404).json({ error: "Pack not found" });
+        res.json(pack);
+      } catch (err) {
+        console.error("[CarkedIt API] Get pack error:", err);
+        res.status(500).json({ error: "Failed to retrieve pack" });
+      }
+    });
+
+    app.put("/api/carkedit/packs/:id", (req: any, res: any) => {
+      try {
+        const pack = updatePack(req.params.id, req.body);
+        if (!pack) return res.status(404).json({ error: "Pack not found" });
+        res.json(pack);
+      } catch (err: any) {
+        if (err.message?.includes('no cards')) {
+          return res.status(400).json({ error: err.message });
+        }
+        console.error("[CarkedIt API] Update pack error:", err);
+        res.status(500).json({ error: "Failed to update pack" });
+      }
+    });
+
+    app.delete("/api/carkedit/packs/:id", (req: any, res: any) => {
+      try {
+        const deleted = deletePack(req.params.id);
+        if (!deleted) return res.status(404).json({ error: "Pack not found" });
+        res.status(204).end();
+      } catch (err) {
+        console.error("[CarkedIt API] Delete pack error:", err);
+        res.status(500).json({ error: "Failed to delete pack" });
+      }
+    });
+
+    // --- Expansion Card endpoints ---
+
+    app.post("/api/carkedit/packs/:id/cards", (req: any, res: any) => {
+      try {
+        const { cards } = req.body;
+        if (!cards || !Array.isArray(cards) || cards.length === 0) {
+          return res.status(400).json({ error: "cards array is required" });
+        }
+        const validDeckTypes = ['die', 'live', 'bye'];
+        for (const card of cards) {
+          if (!card.deck_type || !validDeckTypes.includes(card.deck_type)) {
+            return res.status(400).json({ error: `Invalid deck_type: ${card.deck_type}. Must be one of: ${validDeckTypes.join(', ')}` });
+          }
+          if (!card.text || typeof card.text !== 'string' || card.text.trim().length === 0) {
+            return res.status(400).json({ error: "Each card must have non-empty text" });
+          }
+        }
+        const created = addCards(req.params.id, cards.map((c: any) => ({ deck_type: c.deck_type, text: c.text.trim() })));
+        res.status(201).json({ cards: created });
+      } catch (err: any) {
+        if (err.message === 'Pack not found') {
+          return res.status(404).json({ error: "Pack not found" });
+        }
+        console.error("[CarkedIt API] Add cards error:", err);
+        res.status(500).json({ error: "Failed to add cards" });
+      }
+    });
+
+    app.put("/api/carkedit/packs/:id/cards/:cardId", (req: any, res: any) => {
+      try {
+        const card = updateCard(req.params.id, req.params.cardId, req.body);
+        if (!card) return res.status(404).json({ error: "Card not found" });
+        res.json(card);
+      } catch (err) {
+        console.error("[CarkedIt API] Update card error:", err);
+        res.status(500).json({ error: "Failed to update card" });
+      }
+    });
+
+    app.delete("/api/carkedit/packs/:id/cards/:cardId", (req: any, res: any) => {
+      try {
+        const deleted = deleteCard(req.params.id, req.params.cardId);
+        if (!deleted) return res.status(404).json({ error: "Card not found" });
+        res.status(204).end();
+      } catch (err) {
+        console.error("[CarkedIt API] Delete card error:", err);
+        res.status(500).json({ error: "Failed to delete card" });
       }
     });
   },
