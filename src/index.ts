@@ -6,13 +6,30 @@ import express from "express";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
 import { initDatabase, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports } from "./db/database.js";
-import { createUser, getUserById } from "./db/users.js";
+import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase } from "./db/users.js";
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard } from "./db/packs.js";
+import { optionalAuth, requireAuth, setFirebaseAvailable } from "./middleware/auth.js";
 import type { GameResult, IssueReport } from "./db/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "4500", 10);
 const clientDir = process.env.CLIENT_DIR || path.join(__dirname, "../../carkedit-client");
+
+// Initialize Firebase Admin SDK
+const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH || path.join(__dirname, "../firebase-service-account.json");
+try {
+  if (fs.existsSync(serviceAccountPath)) {
+    const { initializeApp, cert } = await import("firebase-admin/app");
+    const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, "utf-8"));
+    initializeApp({ credential: cert(serviceAccount) });
+    setFirebaseAvailable(true);
+    console.log("[CarkedIt API] Firebase Admin initialized");
+  } else {
+    console.warn("[CarkedIt API] Firebase service account not found — auth features disabled");
+  }
+} catch (err: any) {
+  console.warn("[CarkedIt API] Firebase init failed:", err.message);
+}
 
 const serverStartedAt = new Date().toISOString();
 
@@ -32,6 +49,10 @@ const server = defineServer({
     });
 
     app.use(express.static(clientDir));
+
+    // Apply optional auth to pack and user routes
+    app.use('/api/carkedit/packs', optionalAuth());
+    app.use('/api/carkedit/users', optionalAuth());
 
     app.get("/api/carkedit/health", (_req: any, res: any) => {
       res.json({ status: "ok", timestamp: new Date().toISOString() });
@@ -232,11 +253,11 @@ const server = defineServer({
 
     app.post("/api/carkedit/users", (req: any, res: any) => {
       try {
-        const { display_name, firebase_uid, email, avatar_url } = req.body;
+        const { display_name, firebase_uid, email, avatar_url, birth_month, birth_day } = req.body;
         if (!display_name || typeof display_name !== 'string' || display_name.trim().length === 0) {
           return res.status(400).json({ error: "display_name is required" });
         }
-        const user = createUser({ display_name: display_name.trim(), firebase_uid, email, avatar_url });
+        const user = createUser({ display_name: display_name.trim(), firebase_uid, email, avatar_url, birth_month, birth_day });
         res.status(201).json(user);
       } catch (err) {
         console.error("[CarkedIt API] Create user error:", err);
@@ -252,6 +273,38 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Get user error:", err);
         res.status(500).json({ error: "Failed to retrieve user" });
+      }
+    });
+
+    app.patch("/api/carkedit/users/:id", requireAuth(), (req: any, res: any) => {
+      try {
+        const existing = getUserById(req.params.id);
+        if (!existing) return res.status(404).json({ error: "User not found" });
+        if (existing.firebase_uid !== req.firebaseUser!.uid) {
+          return res.status(403).json({ error: "Cannot update another user's profile" });
+        }
+        const { display_name, birth_month, birth_day } = req.body;
+        const user = updateUserProfile(req.params.id, { display_name, birth_month, birth_day });
+        res.json(user);
+      } catch (err) {
+        console.error("[CarkedIt API] Update user error:", err);
+        res.status(500).json({ error: "Failed to update user" });
+      }
+    });
+
+    // Link anonymous user to Firebase account (requires auth)
+    app.post("/api/carkedit/users/link", requireAuth(), (req: any, res: any) => {
+      try {
+        const { anonymous_user_id } = req.body;
+        if (!anonymous_user_id || typeof anonymous_user_id !== 'string') {
+          return res.status(400).json({ error: "anonymous_user_id is required" });
+        }
+        const user = linkAnonymousUserToFirebase(anonymous_user_id, req.firebaseUser!.uid);
+        if (!user) return res.status(404).json({ error: "Anonymous user not found" });
+        res.json(user);
+      } catch (err) {
+        console.error("[CarkedIt API] Link user error:", err);
+        res.status(500).json({ error: "Failed to link user" });
       }
     });
 

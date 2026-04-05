@@ -270,6 +270,7 @@ export class GameRoom extends Room<{ state: GameState }> {
     player.birthMonth = (month >= 1 && month <= 12) ? month : 0;
     player.birthDay = (day >= 1 && day <= 31) ? day : 0;
     player.isDevName = !!options.isDevName;
+    player.userId = options.userId || "";
     this.state.players.set(client.sessionId, player);
 
     const isHost = !this.state.hostId;

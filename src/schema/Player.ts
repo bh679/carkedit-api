@@ -4,6 +4,7 @@ import { Card } from "./Card.js";
 export class Player extends Schema {
   @type("string") sessionId: string = "";
   @type("string") name: string = "";
+  @type("string") userId: string = "";
   @type("boolean") ready: boolean = false;
   @type("boolean") connected: boolean = true;
   @type("number") score: number = 0;
