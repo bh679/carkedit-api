@@ -6,7 +6,7 @@ import express from "express";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
 import { initDatabase, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports } from "./db/database.js";
-import { createUser, getUserById, linkAnonymousUserToFirebase } from "./db/users.js";
+import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase } from "./db/users.js";
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard } from "./db/packs.js";
 import { optionalAuth, requireAuth, setFirebaseAvailable } from "./middleware/auth.js";
 import type { GameResult, IssueReport } from "./db/types.js";
@@ -253,11 +253,11 @@ const server = defineServer({
 
     app.post("/api/carkedit/users", (req: any, res: any) => {
       try {
-        const { display_name, firebase_uid, email, avatar_url } = req.body;
+        const { display_name, firebase_uid, email, avatar_url, birth_month, birth_day } = req.body;
         if (!display_name || typeof display_name !== 'string' || display_name.trim().length === 0) {
           return res.status(400).json({ error: "display_name is required" });
         }
-        const user = createUser({ display_name: display_name.trim(), firebase_uid, email, avatar_url });
+        const user = createUser({ display_name: display_name.trim(), firebase_uid, email, avatar_url, birth_month, birth_day });
         res.status(201).json(user);
       } catch (err) {
         console.error("[CarkedIt API] Create user error:", err);
@@ -273,6 +273,22 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Get user error:", err);
         res.status(500).json({ error: "Failed to retrieve user" });
+      }
+    });
+
+    app.patch("/api/carkedit/users/:id", requireAuth(), (req: any, res: any) => {
+      try {
+        const existing = getUserById(req.params.id);
+        if (!existing) return res.status(404).json({ error: "User not found" });
+        if (existing.firebase_uid !== req.firebaseUser!.uid) {
+          return res.status(403).json({ error: "Cannot update another user's profile" });
+        }
+        const { display_name, birth_month, birth_day } = req.body;
+        const user = updateUserProfile(req.params.id, { display_name, birth_month, birth_day });
+        res.json(user);
+      } catch (err) {
+        console.error("[CarkedIt API] Update user error:", err);
+        res.status(500).json({ error: "Failed to update user" });
       }
     });
 

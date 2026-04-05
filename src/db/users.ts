@@ -7,9 +7,13 @@ export function createUser(data: {
   firebase_uid?: string | null;
   email?: string | null;
   avatar_url?: string | null;
+  birth_month?: number;
+  birth_day?: number;
 }): User {
   const db = getDb();
   const id = `usr_${randomUUID()}`;
+  const bm = (data.birth_month && data.birth_month >= 1 && data.birth_month <= 12) ? data.birth_month : 0;
+  const bd = (data.birth_day && data.birth_day >= 1 && data.birth_day <= 31) ? data.birth_day : 0;
 
   // If firebase_uid provided, try upsert
   if (data.firebase_uid) {
@@ -20,17 +24,19 @@ export function createUser(data: {
           display_name = COALESCE(?, display_name),
           email = COALESCE(?, email),
           avatar_url = COALESCE(?, avatar_url),
+          birth_month = ?,
+          birth_day = ?,
           updated_at = datetime('now')
         WHERE firebase_uid = ?
-      `).run(data.display_name, data.email ?? null, data.avatar_url ?? null, data.firebase_uid);
+      `).run(data.display_name, data.email ?? null, data.avatar_url ?? null, bm || existing.birth_month, bd || existing.birth_day, data.firebase_uid);
       return db.prepare('SELECT * FROM users WHERE firebase_uid = ?').get(data.firebase_uid) as User;
     }
   }
 
   db.prepare(`
-    INSERT INTO users (id, firebase_uid, display_name, email, avatar_url)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(id, data.firebase_uid ?? null, data.display_name, data.email ?? null, data.avatar_url ?? null);
+    INSERT INTO users (id, firebase_uid, display_name, email, avatar_url, birth_month, birth_day)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(id, data.firebase_uid ?? null, data.display_name, data.email ?? null, data.avatar_url ?? null, bm, bd);
 
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User;
 }
@@ -64,9 +70,30 @@ export function upsertUserFromFirebase(firebaseUser: {
 
   const id = `usr_${randomUUID()}`;
   db.prepare(`
-    INSERT INTO users (id, firebase_uid, display_name, email, avatar_url)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO users (id, firebase_uid, display_name, email, avatar_url, birth_month, birth_day)
+    VALUES (?, ?, ?, ?, ?, 0, 0)
   `).run(id, firebaseUser.uid, firebaseUser.name || 'User', firebaseUser.email ?? null, firebaseUser.picture ?? null);
+
+  return db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User;
+}
+
+export function updateUserProfile(id: string, data: {
+  display_name?: string;
+  birth_month?: number;
+  birth_day?: number;
+}): User | null {
+  const db = getDb();
+  const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User | undefined;
+  if (!existing) return null;
+
+  const name = data.display_name?.trim() || existing.display_name;
+  const bm = (data.birth_month !== undefined && data.birth_month >= 0 && data.birth_month <= 12) ? data.birth_month : existing.birth_month;
+  const bd = (data.birth_day !== undefined && data.birth_day >= 0 && data.birth_day <= 31) ? data.birth_day : existing.birth_day;
+
+  db.prepare(`
+    UPDATE users SET display_name = ?, birth_month = ?, birth_day = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `).run(name, bm, bd, id);
 
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User;
 }
