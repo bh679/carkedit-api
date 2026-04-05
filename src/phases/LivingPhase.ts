@@ -266,6 +266,10 @@ export function handleRevealComplete(state: GameState, client: Client): void {
 }
 
 function transitionToConvince(state: GameState): void {
+  const isLiving = state.phase === "living_reveal";
+  const isBye = state.phase === "bye_reveal";
+  if (!isLiving && !isBye) return; // safety net — only valid from reveal phases
+
   console.log(`[LivingPhase] Entering convincing phase`);
 
   // Find first non-Living-Dead player in turnOrder
@@ -273,12 +277,7 @@ function transitionToConvince(state: GameState): void {
   if (!firstConvincer) return;
 
   state.convincingTurn = firstConvincer;
-
-  if (state.phase === "living_reveal") {
-    state.phase = "living_convince";
-  } else {
-    state.phase = "bye_convince";
-  }
+  state.phase = isLiving ? "living_convince" : "bye_convince";
 }
 
 function transitionToSelect(state: GameState): void {
