@@ -105,6 +105,10 @@ export function linkAnonymousUserToFirebase(anonymousUserId: string, firebaseUid
   const existingFirebase = db.prepare('SELECT * FROM users WHERE firebase_uid = ?').get(firebaseUid) as User | undefined;
 
   if (existingFirebase) {
+    // Already linked — same user, just return
+    if (existingFirebase.id === anonymousUserId) {
+      return existingFirebase;
+    }
     // Migrate packs from anonymous to existing Firebase user
     const transaction = db.transaction(() => {
       db.prepare('UPDATE expansion_packs SET creator_id = ? WHERE creator_id = ?')
