@@ -15,4 +15,5 @@ export class Player extends Schema {
   @type("boolean") hasBeenLivingDead: boolean = false;
   @type("boolean") hasWildcard: boolean = false;
   @type("boolean") isDevName: boolean = false;
+  @type("boolean") needsDieCard: boolean = false;
 }

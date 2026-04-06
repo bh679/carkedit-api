@@ -60,4 +60,7 @@ export class GameState extends Schema {
   @type(["string"]) selectedEulogists = new ArraySchema<string>();
   @type("number") currentEulogistIndex: number = 0;
   @type("string") bestEulogist: string = "";
+
+  // Late-join: tracks which phase to resume after a mini die phase
+  @type("string") pendingPhase: string = "";
 }
