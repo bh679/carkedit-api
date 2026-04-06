@@ -168,6 +168,29 @@ export function handleNextRound(state: GameState, _client?: Client): void {
   const nextLivingDead = getNextLivingDead(state);
 
   if (nextLivingDead) {
+    const nextLDPlayer = state.players.get(nextLivingDead);
+
+    // Late joiner needs a mini die phase before becoming Living Dead
+    if (nextLDPlayer?.needsDieCard && state.dieDeck.length > 0) {
+      state.pendingPhase = wasLiving ? "living_submit" : "bye_submit";
+
+      // Clear their current hand and deal a die card
+      nextLDPlayer.hand.clear();
+      const dieCard = state.dieDeck.splice(0, 1)[0];
+      nextLDPlayer.hand.push(dieCard);
+
+      state.currentTurn = nextLivingDead;
+      state.currentLivingDead = nextLivingDead;
+      state.phase = "die_phase";
+      console.log(`[LivingPhase] Mini die phase for late joiner ${nextLDPlayer.name}`);
+      return;
+    }
+
+    // Late joiner but die deck empty — skip mini die phase, clear flag
+    if (nextLDPlayer?.needsDieCard) {
+      nextLDPlayer.needsDieCard = false;
+    }
+
     // Continue with next Living Dead (same round)
     state.currentLivingDead = nextLivingDead;
     state.currentTurn = nextLivingDead;
@@ -196,16 +219,35 @@ export function handleNextRound(state: GameState, _client?: Client): void {
       state.players.forEach((p) => {
         p.hasBeenLivingDead = false;
       });
-      state.currentLivingDead = state.turnOrder[0];
-      state.currentTurn = state.turnOrder[0];
 
-      if (wasLiving) {
-        state.phase = "living_submit";
+      const firstLD = state.turnOrder[0];
+      const firstLDPlayer = state.players.get(firstLD);
+
+      // Check if first player in new round needs mini die phase
+      if (firstLDPlayer?.needsDieCard && state.dieDeck.length > 0) {
+        state.pendingPhase = wasLiving ? "living_submit" : "bye_submit";
+        firstLDPlayer.hand.clear();
+        const dieCard = state.dieDeck.splice(0, 1)[0];
+        firstLDPlayer.hand.push(dieCard);
+        state.currentTurn = firstLD;
+        state.currentLivingDead = firstLD;
+        state.phase = "die_phase";
+        console.log(`[LivingPhase] Mini die phase for late joiner ${firstLDPlayer.name} at round start`);
       } else {
-        state.phase = "bye_submit";
-      }
+        if (firstLDPlayer?.needsDieCard) {
+          firstLDPlayer.needsDieCard = false;
+        }
+        state.currentLivingDead = firstLD;
+        state.currentTurn = firstLD;
 
-      console.log(`[LivingPhase] Starting round ${state.round + 1} — ${state.currentLivingDead} is The Living Dead`);
+        if (wasLiving) {
+          state.phase = "living_submit";
+        } else {
+          state.phase = "bye_submit";
+        }
+
+        console.log(`[LivingPhase] Starting round ${state.round + 1} — ${state.currentLivingDead} is The Living Dead`);
+      }
     }
   }
 }
@@ -242,6 +284,8 @@ function allPlayersSubmitted(state: GameState): boolean {
   let allSubmitted = true;
   state.players.forEach((player, sessionId) => {
     if (sessionId === state.currentLivingDead) return; // Skip Living Dead
+    if (player.needsDieCard) return; // Skip late joiners awaiting die card
+    if (player.hand.length === 0) return; // Skip players with no cards (joined mid-round)
     if (!player.hasSubmitted) allSubmitted = false;
   });
   return allSubmitted;
@@ -295,8 +339,14 @@ function transitionToSelect(state: GameState): void {
 
 function getFirstNonLivingDead(state: GameState): string | null {
   for (let i = 0; i < state.turnOrder.length; i++) {
-    if (state.turnOrder[i] !== state.currentLivingDead) {
-      return state.turnOrder[i];
+    const playerId = state.turnOrder[i];
+    if (playerId === state.currentLivingDead) continue;
+    // Skip late joiners who haven't submitted (no card to convince with)
+    const hasSubmittedCard = state.submittedCards.some(
+      (card) => card.submittedBy === playerId
+    );
+    if (hasSubmittedCard) {
+      return playerId;
     }
   }
   return null;

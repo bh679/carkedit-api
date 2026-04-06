@@ -29,8 +29,58 @@ export function handleEndDieTurn(state: GameState, client: Client): void {
 
   console.log(`[DiePhase] ${player.name} ended their turn`);
 
+  // Mini die phase for a late joiner — resume the pending phase
+  if (state.pendingPhase) {
+    player.needsDieCard = false;
+    const resumePhase = state.pendingPhase;
+    state.pendingPhase = "";
+
+    // Clear die card from hand before resuming (living/bye cards already dealt)
+    player.hand.clear();
+
+    // Re-deal the appropriate phase cards for this player
+    if (resumePhase === "living_submit") {
+      for (let i = 0; i < state.handSize; i++) {
+        if (state.livingDeck.length > 0) {
+          const card = state.livingDeck.splice(0, 1)[0];
+          card.faceUp = true;
+          player.hand.push(card);
+        }
+      }
+    } else if (resumePhase === "bye_submit") {
+      for (let i = 0; i < state.handSize; i++) {
+        if (state.byeDeck.length > 0) {
+          const card = state.byeDeck.splice(0, 1)[0];
+          card.faceUp = true;
+          player.hand.push(card);
+        }
+      }
+      let hasWildcard = false;
+      for (let i = 0; i < player.hand.length; i++) {
+        if (player.hand[i].special === "Wildcard") {
+          hasWildcard = true;
+          break;
+        }
+      }
+      player.hasWildcard = hasWildcard;
+    }
+
+    state.currentLivingDead = client.sessionId;
+    state.currentTurn = client.sessionId;
+    state.phase = resumePhase;
+    console.log(`[DiePhase] Mini die phase complete — resuming ${resumePhase} with ${player.name} as Living Dead`);
+    return;
+  }
+
   const currentIndex = state.turnOrder.indexOf(client.sessionId);
-  const nextIndex = currentIndex + 1;
+
+  // Find next player who has a die card (skip late joiners with empty hands)
+  let nextIndex = currentIndex + 1;
+  while (nextIndex < state.turnOrder.length) {
+    const nextPlayer = state.players.get(state.turnOrder[nextIndex]);
+    if (nextPlayer && nextPlayer.hand.length > 0) break;
+    nextIndex++;
+  }
 
   if (nextIndex < state.turnOrder.length) {
     state.currentTurn = state.turnOrder[nextIndex];
