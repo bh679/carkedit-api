@@ -113,7 +113,7 @@ export function setAdminFlag(userId: string, isAdmin: boolean): User | null {
   const db = getDb();
   const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as User | undefined;
   if (!existing) return null;
-  db.prepare('UPDATE users SET is_admin = ?, updated_at = datetime("now") WHERE id = ?')
+  db.prepare(`UPDATE users SET is_admin = ?, updated_at = datetime('now') WHERE id = ?`)
     .run(isAdmin ? 1 : 0, userId);
   return db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as User;
 }
