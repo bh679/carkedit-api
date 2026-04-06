@@ -394,8 +394,28 @@ export function transitionToByeSetup(state: GameState): void {
     player.hasSubmitted = false;
   });
 
-  // Deal handSize Bye cards per player (using state.handSize)
+  // Guarantee at least one wildcard is dealt when setting is "atLeastOne"
   const playerIds = Array.from(state.turnOrder);
+  if (state.forceWildcards === "atLeastOne") {
+    const dealZoneSize = playerIds.length * state.handSize;
+    const dealZone = state.byeDeck.slice(0, Math.min(dealZoneSize, state.byeDeck.length));
+    const hasWildcardInZone = dealZone.some((card) => card.special === "Wildcard");
+    if (!hasWildcardInZone) {
+      // Find a wildcard deeper in the deck and swap it into the deal zone
+      for (let i = dealZoneSize; i < state.byeDeck.length; i++) {
+        if (state.byeDeck[i].special === "Wildcard") {
+          const swapIdx = Math.floor(Math.random() * dealZoneSize);
+          const temp = state.byeDeck[swapIdx];
+          state.byeDeck[swapIdx] = state.byeDeck[i];
+          state.byeDeck[i] = temp;
+          console.log(`[ByePhase] Wildcard guarantee: swapped wildcard from position ${i} to ${swapIdx}`);
+          break;
+        }
+      }
+    }
+  }
+
+  // Deal handSize Bye cards per player (using state.handSize)
   for (const playerId of playerIds) {
     const player = state.players.get(playerId);
     if (!player) continue;
