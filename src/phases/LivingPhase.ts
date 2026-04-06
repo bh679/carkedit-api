@@ -146,6 +146,11 @@ export function handleNextRound(state: GameState, _client?: Client): void {
 
   const wasLiving = state.phase === "living_winner";
 
+  // Log player states for late-join debugging
+  state.players.forEach((p, sid) => {
+    console.log(`[LivingPhase] handleNextRound: ${p.name} — hasBeenLD=${p.hasBeenLivingDead}, needsDie=${p.needsDieCard}, hand=${p.hand.length}, submitted=${p.hasSubmitted}`);
+  });
+
   // Capture winning card index before clearing
   const winningIdx = state.roundWinnerCardIndex;
 
@@ -311,8 +316,14 @@ function allPlayersSubmitted(state: GameState): boolean {
   let allSubmitted = true;
   state.players.forEach((player, sessionId) => {
     if (sessionId === state.currentLivingDead) return; // Skip Living Dead
-    if (player.needsDieCard) return; // Skip late joiners awaiting die card
-    if (player.hand.length === 0) return; // Skip players with no cards (joined mid-round)
+    if (player.needsDieCard) {
+      console.log(`[LivingPhase] allPlayersSubmitted: skipping ${player.name} (needsDieCard)`);
+      return;
+    }
+    if (player.hand.length === 0) {
+      console.log(`[LivingPhase] allPlayersSubmitted: skipping ${player.name} (empty hand)`);
+      return;
+    }
     if (!player.hasSubmitted) allSubmitted = false;
   });
   return allSubmitted;

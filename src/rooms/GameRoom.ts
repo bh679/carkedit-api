@@ -284,45 +284,14 @@ export class GameRoom extends Room<{ state: GameState }> {
     this.state.turnOrder.splice(0, this.state.turnOrder.length);
     newOrder.forEach((id) => this.state.turnOrder.push(id));
 
-    // Late join: if game is past lobby, mark for deferred die card and deal phase cards
+    // Late join: if game is past lobby, mark for deferred die card.
+    // Cards are NOT dealt here — the mini die completion handler (DiePhase.ts)
+    // deals the correct phase cards after the late joiner's die reveal.
+    // Dealing here would waste deck cards (cleared then re-dealt in mini die).
     const isLateJoin = this.state.phase !== "lobby";
     if (isLateJoin) {
       player.needsDieCard = true;
-
-      // Deal living cards if we're in a living phase
-      const livingPhases = ["living_submit", "living_reveal", "living_convince", "living_select", "living_winner"];
-      if (livingPhases.includes(this.state.phase)) {
-        for (let i = 0; i < this.state.handSize; i++) {
-          if (this.state.livingDeck.length > 0) {
-            const card = this.state.livingDeck.splice(0, 1)[0];
-            card.faceUp = true;
-            player.hand.push(card);
-          }
-        }
-      }
-
-      // Deal bye cards if we're in a bye phase
-      const byePhases = ["bye_submit", "bye_reveal", "bye_convince", "bye_select", "bye_winner"];
-      if (byePhases.includes(this.state.phase)) {
-        for (let i = 0; i < this.state.handSize; i++) {
-          if (this.state.byeDeck.length > 0) {
-            const card = this.state.byeDeck.splice(0, 1)[0];
-            card.faceUp = true;
-            player.hand.push(card);
-          }
-        }
-        // Check for wildcards
-        let hasWildcard = false;
-        for (let i = 0; i < player.hand.length; i++) {
-          if (player.hand[i].special === "Wildcard") {
-            hasWildcard = true;
-            break;
-          }
-        }
-        player.hasWildcard = hasWildcard;
-      }
-
-      console.log(`[GameRoom] Late join: ${player.name} joined during ${this.state.phase} — needsDieCard=true`);
+      console.log(`[GameRoom] Late join: ${player.name} joined during ${this.state.phase} — needsDieCard=true, hand=${player.hand.length}, dieDeck=${this.state.dieDeck.length}, livingDeck=${this.state.livingDeck.length}, byeDeck=${this.state.byeDeck.length}`);
     }
 
     this.logEvent(client, "player_joined", {
