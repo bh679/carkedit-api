@@ -146,6 +146,9 @@ export function handleNextRound(state: GameState, _client?: Client): void {
 
   const wasLiving = state.phase === "living_winner";
 
+  // Capture winning card index before clearing
+  const winningIdx = state.roundWinnerCardIndex;
+
   // Clear winner info
   state.roundWinner = "";
   state.roundWinnerCardIndex = -1;
@@ -156,6 +159,16 @@ export function handleNextRound(state: GameState, _client?: Client): void {
     livingDead.hasBeenLivingDead = true;
   }
 
+  // Return non-winning submitted cards to the bottom of the deck
+  const deck = wasLiving ? state.livingDeck : state.byeDeck;
+  for (let i = 0; i < state.submittedCards.length; i++) {
+    if (i === winningIdx) continue; // winning card is consumed
+    const card = state.submittedCards[i];
+    card.faceUp = false;
+    card.submittedBy = "";
+    deck.push(card);
+  }
+
   // Clear submitted cards
   state.submittedCards.clear();
 
@@ -163,6 +176,20 @@ export function handleNextRound(state: GameState, _client?: Client): void {
   state.players.forEach((p) => {
     p.hasSubmitted = false;
   });
+
+  // Refill each player's hand up to handSize from the deck
+  const refillDeck = wasLiving ? state.livingDeck : state.byeDeck;
+  state.players.forEach((player, sessionId) => {
+    if (sessionId === state.currentLivingDead) return; // Living Dead doesn't submit
+    if (player.needsDieCard) return; // skip late joiners awaiting die card
+    while (player.hand.length < state.handSize && refillDeck.length > 0) {
+      const card = refillDeck.splice(0, 1)[0];
+      card.faceUp = true;
+      player.hand.push(card);
+    }
+  });
+
+  console.log(`[LivingPhase] Hands refilled — deck has ${refillDeck.length} cards remaining`);
 
   // Find next Living Dead (next player in turnOrder who hasn't been Living Dead)
   const nextLivingDead = getNextLivingDead(state);
