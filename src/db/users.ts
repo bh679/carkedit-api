@@ -98,6 +98,26 @@ export function updateUserProfile(id: string, data: {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User;
 }
 
+export function listUsers(): User[] {
+  const db = getDb();
+  return db.prepare('SELECT * FROM users ORDER BY created_at DESC').all() as User[];
+}
+
+export function hasAnyAdmin(): boolean {
+  const db = getDb();
+  const row = db.prepare('SELECT COUNT(*) as c FROM users WHERE is_admin = 1').get() as { c: number };
+  return row.c > 0;
+}
+
+export function setAdminFlag(userId: string, isAdmin: boolean): User | null {
+  const db = getDb();
+  const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as User | undefined;
+  if (!existing) return null;
+  db.prepare(`UPDATE users SET is_admin = ?, updated_at = datetime('now') WHERE id = ?`)
+    .run(isAdmin ? 1 : 0, userId);
+  return db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as User;
+}
+
 export function linkAnonymousUserToFirebase(anonymousUserId: string, firebaseUid: string): User | null {
   const db = getDb();
 

@@ -144,6 +144,7 @@ export interface User {
   display_name: string;
   email: string | null;
   avatar_url: string | null;
+  is_admin: number;
   birth_month: number;
   birth_day: number;
   created_at: string;

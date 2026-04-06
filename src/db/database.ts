@@ -122,6 +122,7 @@ export function initDatabase(): void {
       display_name TEXT NOT NULL,
       email TEXT,
       avatar_url TEXT,
+      is_admin INTEGER NOT NULL DEFAULT 0,
       birth_month INTEGER NOT NULL DEFAULT 0,
       birth_day INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -171,6 +172,12 @@ export function initDatabase(): void {
     if (!cols.includes(col)) {
       db.exec(sql);
     }
+  }
+
+  // Migrate: add is_admin to users if missing (for existing DBs)
+  const userCols = db.prepare("PRAGMA table_info(users)").all().map((c: any) => c.name);
+  if (!userCols.includes('is_admin')) {
+    db.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0');
   }
 }
 
