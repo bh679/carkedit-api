@@ -38,7 +38,7 @@ export class GameState extends Schema {
   @type("boolean") enableLive: boolean = true;
   @type("boolean") enableBye: boolean = true;
   @type("boolean") enableEulogy: boolean = true;
-  @type("boolean") forceWildcards: boolean = false;
+  @type("string") forceWildcards: string = "atLeastOne";
   @type("boolean") playableWildcards: boolean = true;
   @type("number") wildcardCount: number = 2;
   @type("number") eulogistCount: number = 2;
