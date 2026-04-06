@@ -128,10 +128,26 @@ function transitionToLivingSetup(state: GameState): void {
     }
   }
 
-  state.currentLivingDead = state.turnOrder[0];
-  state.currentTurn = state.turnOrder[0];
-  state.round = 0;
-  state.phase = "living_submit";
+  const firstLD = state.turnOrder[0];
+  const firstLDPlayer = state.players.get(firstLD);
 
-  console.log(`[LivingPhase] Setup complete — ${state.currentLivingDead} is The Living Dead`);
+  state.currentLivingDead = firstLD;
+  state.currentTurn = firstLD;
+  state.round = 0;
+
+  // Check if first Living Dead is a late joiner needing a mini die phase
+  if (firstLDPlayer?.needsDieCard && state.dieDeck.length > 0) {
+    state.pendingPhase = "living_submit";
+    firstLDPlayer.hand.clear();
+    const dieCard = state.dieDeck.splice(0, 1)[0];
+    firstLDPlayer.hand.push(dieCard);
+    state.phase = "die_phase";
+    console.log(`[LivingPhase] Mini die phase for late joiner ${firstLDPlayer.name} before Living setup`);
+  } else {
+    if (firstLDPlayer?.needsDieCard) {
+      firstLDPlayer.needsDieCard = false;
+    }
+    state.phase = "living_submit";
+    console.log(`[LivingPhase] Setup complete — ${firstLD} is The Living Dead`);
+  }
 }

@@ -420,10 +420,26 @@ export function transitionToByeSetup(state: GameState): void {
   }
 
   // Set first player as Living Dead for Bye phase
-  state.currentLivingDead = state.turnOrder[0];
-  state.currentTurn = state.turnOrder[0];
-  state.round = 0;
-  state.phase = "bye_submit";
+  const firstLD = state.turnOrder[0];
+  const firstLDPlayer = state.players.get(firstLD);
 
-  console.log(`[ByePhase] Setup complete — ${state.currentLivingDead} is The Living Dead`);
+  state.currentLivingDead = firstLD;
+  state.currentTurn = firstLD;
+  state.round = 0;
+
+  // Check if first Living Dead is a late joiner needing a mini die phase
+  if (firstLDPlayer?.needsDieCard && state.dieDeck.length > 0) {
+    state.pendingPhase = "bye_submit";
+    firstLDPlayer.hand.clear();
+    const dieCard = state.dieDeck.splice(0, 1)[0];
+    firstLDPlayer.hand.push(dieCard);
+    state.phase = "die_phase";
+    console.log(`[ByePhase] Mini die phase for late joiner ${firstLDPlayer.name} before Bye setup`);
+  } else {
+    if (firstLDPlayer?.needsDieCard) {
+      firstLDPlayer.needsDieCard = false;
+    }
+    state.phase = "bye_submit";
+    console.log(`[ByePhase] Setup complete — ${firstLD} is The Living Dead`);
+  }
 }
