@@ -35,10 +35,10 @@ export function handleEndDieTurn(state: GameState, client: Client): void {
     const resumePhase = state.pendingPhase;
     state.pendingPhase = "";
 
-    // Clear die card from hand before resuming (living/bye cards already dealt)
+    // Clear die card from hand before resuming
     player.hand.clear();
 
-    // Re-deal the appropriate phase cards for this player
+    // Deal the appropriate phase cards for this late joiner
     if (resumePhase === "living_submit") {
       for (let i = 0; i < state.handSize; i++) {
         if (state.livingDeck.length > 0) {
@@ -68,7 +68,7 @@ export function handleEndDieTurn(state: GameState, client: Client): void {
     state.currentLivingDead = client.sessionId;
     state.currentTurn = client.sessionId;
     state.phase = resumePhase;
-    console.log(`[DiePhase] Mini die phase complete — resuming ${resumePhase} with ${player.name} as Living Dead`);
+    console.log(`[DiePhase] Mini die phase complete — resuming ${resumePhase} with ${player.name} as Living Dead (hand=${player.hand.length}, needsDieCard=${player.needsDieCard})`);
     return;
   }
 
