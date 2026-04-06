@@ -146,6 +146,9 @@ export function handleNextRound(state: GameState, _client?: Client): void {
 
   const wasLiving = state.phase === "living_winner";
 
+  // Capture winning card index before clearing
+  const winningIdx = state.roundWinnerCardIndex;
+
   // Clear winner info
   state.roundWinner = "";
   state.roundWinnerCardIndex = -1;
@@ -158,7 +161,6 @@ export function handleNextRound(state: GameState, _client?: Client): void {
 
   // Return non-winning submitted cards to the bottom of the deck
   const deck = wasLiving ? state.livingDeck : state.byeDeck;
-  const winningIdx = state.roundWinnerCardIndex;
   for (let i = 0; i < state.submittedCards.length; i++) {
     if (i === winningIdx) continue; // winning card is consumed
     const card = state.submittedCards[i];
