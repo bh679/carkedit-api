@@ -174,10 +174,16 @@ export function initDatabase(): void {
     }
   }
 
-  // Migrate: add is_admin to users if missing (for existing DBs)
+  // Migrate: add missing columns to users if needed (for existing DBs)
   const userCols = db.prepare("PRAGMA table_info(users)").all().map((c: any) => c.name);
   if (!userCols.includes('is_admin')) {
     db.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!userCols.includes('birth_month')) {
+    db.exec('ALTER TABLE users ADD COLUMN birth_month INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!userCols.includes('birth_day')) {
+    db.exec('ALTER TABLE users ADD COLUMN birth_day INTEGER NOT NULL DEFAULT 0');
   }
 }
 
