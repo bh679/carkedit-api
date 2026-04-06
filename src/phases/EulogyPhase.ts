@@ -10,13 +10,13 @@ import { Client } from "colyseus";
 export function transitionToEulogy(state: GameState): void {
   console.log(`[EulogyPhase] Checking for wildcard holders...`);
 
-  // Detect wildcard holders: if forceWildcards, everyone is a wildcard holder
+  // Detect wildcard holders: if forceWildcards === "everyone", everyone is a wildcard holder
   const wildcardIds: string[] = [];
   for (const sessionId of Array.from(state.turnOrder)) {
     const player = state.players.get(sessionId);
-    if (player && (state.forceWildcards || player.hasWildcard)) {
+    if (player && (state.forceWildcards === "everyone" || player.hasWildcard)) {
       wildcardIds.push(sessionId);
-      console.log(`[EulogyPhase] ${player.name} has a wildcard${state.forceWildcards ? ' (forced)' : ''}`);
+      console.log(`[EulogyPhase] ${player.name} has a wildcard${state.forceWildcards === "everyone" ? ' (forced)' : ''}`);
     }
   }
 

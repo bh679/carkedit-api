@@ -151,6 +151,9 @@ export function handleNextRound(state: GameState, _client?: Client): void {
     console.log(`[LivingPhase] handleNextRound: ${p.name} — hasBeenLD=${p.hasBeenLivingDead}, needsDie=${p.needsDieCard}, hand=${p.hand.length}, submitted=${p.hasSubmitted}`);
   });
 
+  // Capture winning card index before clearing
+  const winningIdx = state.roundWinnerCardIndex;
+
   // Clear winner info
   state.roundWinner = "";
   state.roundWinnerCardIndex = -1;
@@ -161,6 +164,16 @@ export function handleNextRound(state: GameState, _client?: Client): void {
     livingDead.hasBeenLivingDead = true;
   }
 
+  // Return non-winning submitted cards to the bottom of the deck
+  const deck = wasLiving ? state.livingDeck : state.byeDeck;
+  for (let i = 0; i < state.submittedCards.length; i++) {
+    if (i === winningIdx) continue; // winning card is consumed
+    const card = state.submittedCards[i];
+    card.faceUp = false;
+    card.submittedBy = "";
+    deck.push(card);
+  }
+
   // Clear submitted cards
   state.submittedCards.clear();
 
@@ -168,6 +181,20 @@ export function handleNextRound(state: GameState, _client?: Client): void {
   state.players.forEach((p) => {
     p.hasSubmitted = false;
   });
+
+  // Refill each player's hand up to handSize from the deck
+  const refillDeck = wasLiving ? state.livingDeck : state.byeDeck;
+  state.players.forEach((player, sessionId) => {
+    if (sessionId === state.currentLivingDead) return; // Living Dead doesn't submit
+    if (player.needsDieCard) return; // skip late joiners awaiting die card
+    while (player.hand.length < state.handSize && refillDeck.length > 0) {
+      const card = refillDeck.splice(0, 1)[0];
+      card.faceUp = true;
+      player.hand.push(card);
+    }
+  });
+
+  console.log(`[LivingPhase] Hands refilled — deck has ${refillDeck.length} cards remaining`);
 
   // Find next Living Dead (next player in turnOrder who hasn't been Living Dead)
   const nextLivingDead = getNextLivingDead(state);
@@ -405,8 +432,28 @@ export function transitionToByeSetup(state: GameState): void {
     player.hasSubmitted = false;
   });
 
-  // Deal handSize Bye cards per player (using state.handSize)
+  // Guarantee at least one wildcard is dealt when setting is "atLeastOne"
   const playerIds = Array.from(state.turnOrder);
+  if (state.forceWildcards === "atLeastOne") {
+    const dealZoneSize = playerIds.length * state.handSize;
+    const dealZone = state.byeDeck.slice(0, Math.min(dealZoneSize, state.byeDeck.length));
+    const hasWildcardInZone = dealZone.some((card) => card.special === "Wildcard");
+    if (!hasWildcardInZone) {
+      // Find a wildcard deeper in the deck and swap it into the deal zone
+      for (let i = dealZoneSize; i < state.byeDeck.length; i++) {
+        if (state.byeDeck[i].special === "Wildcard") {
+          const swapIdx = Math.floor(Math.random() * dealZoneSize);
+          const temp = state.byeDeck[swapIdx];
+          state.byeDeck[swapIdx] = state.byeDeck[i];
+          state.byeDeck[i] = temp;
+          console.log(`[ByePhase] Wildcard guarantee: swapped wildcard from position ${i} to ${swapIdx}`);
+          break;
+        }
+      }
+    }
+  }
+
+  // Deal handSize Bye cards per player (using state.handSize)
   for (const playerId of playerIds) {
     const player = state.players.get(playerId);
     if (!player) continue;

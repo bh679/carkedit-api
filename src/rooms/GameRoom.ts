@@ -366,7 +366,7 @@ export class GameRoom extends Room<{ state: GameState }> {
     // Boolean settings
     const boolKeys = [
       "autoStartOnReady", "enableDie", "enableLive", "enableBye", "enableEulogy",
-      "forceWildcards", "playableWildcards", "optionalCardPlay", "ultraQuickMode",
+      "playableWildcards", "optionalCardPlay", "ultraQuickMode",
       "timerEnabled", "pitchTimerEnabled", "playCardTimerEnabled",
       "timerCountUp", "timerVisible", "timerAutoAdvance",
     ];
@@ -394,6 +394,17 @@ export class GameRoom extends Room<{ state: GameState }> {
       const allowed = ["off", "once_per_phase", "once_per_round", "unlimited"];
       if (typeof value === "string" && allowed.includes(value)) {
         this.state.handRedraws = value;
+      }
+    }
+
+    if (key === "forceWildcards") {
+      const allowed = ["off", "atLeastOne", "everyone"];
+      if (typeof value === "string" && allowed.includes(value)) {
+        this.state.forceWildcards = value;
+      }
+      // Legacy boolean support
+      if (typeof value === "boolean") {
+        this.state.forceWildcards = value ? "everyone" : "off";
       }
     }
   }
