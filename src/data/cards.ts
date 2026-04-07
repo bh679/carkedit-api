@@ -1,5 +1,5 @@
 // Card data — IDs match the client JSON files for illustration lookup
-export interface CardData { id: number; text: string; special?: string; }
+export interface CardData { id: number | string; text: string; special?: string; }
 
 export const DIE_CARDS: CardData[] = [
   { id: 1,  text: "Died by Eating Five-Week Old Leftovers" },

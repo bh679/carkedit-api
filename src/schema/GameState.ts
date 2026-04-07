@@ -53,6 +53,9 @@ export class GameState extends Schema {
   @type("boolean") ultraQuickMode: boolean = false;
   @type("boolean") optionalCardPlay: boolean = false;
 
+  // Expansion packs selected for this game (host-editable in lobby)
+  @type(["string"]) selectedPackIds = new ArraySchema<string>();
+
   // Eulogy (Phase 4) state
   @type("string") currentWildcardPlayer: string = "";
   @type("number") currentWildcardIndex: number = 0;

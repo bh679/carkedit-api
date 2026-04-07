@@ -38,7 +38,7 @@ export function listPacks(filters: {
   status?: string;
   limit?: number;
   offset?: number;
-}): { packs: (ExpansionPack & { card_count: number })[]; total: number } {
+}): { packs: (ExpansionPack & { card_count: number; die_count: number; live_count: number; bye_count: number })[]; total: number } {
   const db = getDb();
   const { limit = 50, offset = 0 } = filters;
 
@@ -56,14 +56,18 @@ export function listPacks(filters: {
   ).get(...params) as { count: number }).count;
 
   const packs = db.prepare(`
-    SELECT ep.*, COUNT(ec.id) as card_count
+    SELECT ep.*,
+      COUNT(ec.id) as card_count,
+      COALESCE(SUM(CASE WHEN ec.deck_type = 'die'  THEN 1 ELSE 0 END), 0) as die_count,
+      COALESCE(SUM(CASE WHEN ec.deck_type = 'live' THEN 1 ELSE 0 END), 0) as live_count,
+      COALESCE(SUM(CASE WHEN ec.deck_type = 'bye'  THEN 1 ELSE 0 END), 0) as bye_count
     FROM expansion_packs ep
     LEFT JOIN expansion_cards ec ON ec.pack_id = ep.id
     ${where}
     GROUP BY ep.id
     ORDER BY ep.created_at DESC
     LIMIT ? OFFSET ?
-  `).all(...params, limit, offset) as (ExpansionPack & { card_count: number })[];
+  `).all(...params, limit, offset) as (ExpansionPack & { card_count: number; die_count: number; live_count: number; bye_count: number })[];
 
   return { packs, total };
 }
@@ -181,4 +185,19 @@ export function deleteCard(packId: string, cardId: string): boolean {
   const db = getDb();
   const result = db.prepare('DELETE FROM expansion_cards WHERE id = ? AND pack_id = ?').run(cardId, packId);
   return result.changes > 0;
+}
+
+/**
+ * Batch fetch all expansion cards belonging to any of the given pack IDs.
+ * Used by GameRoom.startGame() to merge expansion cards into the base decks.
+ */
+export function getCardsByPackIds(packIds: string[]): ExpansionCard[] {
+  // Strip the "base" sentinel — base game cards aren't in the DB
+  const expansionIds = packIds.filter((id) => id && id !== 'base');
+  if (expansionIds.length === 0) return [];
+  const db = getDb();
+  const placeholders = expansionIds.map(() => '?').join(',');
+  return db.prepare(
+    `SELECT * FROM expansion_cards WHERE pack_id IN (${placeholders}) ORDER BY sort_order ASC`
+  ).all(...expansionIds) as ExpansionCard[];
 }
