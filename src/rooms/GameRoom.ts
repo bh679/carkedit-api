@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { Room, Client } from "colyseus";
 import { GameState } from "../schema/GameState.js";
 import { Player } from "../schema/Player.js";
-import { shuffle, createDeck } from "../utils/deck.js";
+import { shuffle, createDeck, expansionCardsToCardData, mergeDecks } from "../utils/deck.js";
+import { getCardsByPackIds } from "../db/packs.js";
 import { computeDodTurnOrder } from "../utils/turnOrder.js";
 import { DIE_CARDS, LIVING_CARDS, BYE_CARDS } from "../data/cards.js";
 import { handleRevealDie, handleEndDieTurn } from "../phases/DiePhase.js";
@@ -34,6 +35,8 @@ export class GameRoom extends Room<{ state: GameState }> {
 
   async onCreate(options: any) {
     this.setState(new GameState());
+    // Default to the base CarkedIt deck enabled (sentinel pack id "base")
+    this.state.selectedPackIds.push("base");
 
     // Generate game ID early so all events are linked from the start
     this._gameId = randomUUID();
@@ -195,6 +198,15 @@ export class GameRoom extends Room<{ state: GameState }> {
       for (const [key, value] of Object.entries(data)) {
         this.applySetting(key, value);
       }
+    });
+
+    this.onMessage("select_packs", (client, data: { packIds: string[] }) => {
+      if (this.state.hostId && this.state.hostId !== client.sessionId) return;
+      if (this.state.phase !== "lobby") return;
+      const ids = Array.isArray(data?.packIds) ? data.packIds.filter((x) => typeof x === "string") : [];
+      this.state.selectedPackIds.clear();
+      for (const id of ids) this.state.selectedPackIds.push(id);
+      this.logEvent(client, "packs_selected", { packIds: ids });
     });
 
     // Eulogy (Phase 4) message handlers
@@ -563,9 +575,25 @@ export class GameRoom extends Room<{ state: GameState }> {
     this._gameStartedAt = new Date().toISOString();
     this._previousPhase = "lobby"; // ensure phase_changed fires for die_phase
 
-    const shuffledDieDeck = shuffle(createDeck(DIE_CARDS, "die"));
-    const shuffledLivingDeck = shuffle(createDeck(LIVING_CARDS, "living"));
-    const shuffledByeDeck = shuffle(createDeck(BYE_CARDS, "bye"));
+    // Merge any selected expansion packs with the base-game cards.
+    // The base game is represented by the sentinel pack id "base" — if it's
+    // not in selectedPackIds the host has chosen an expansion-only game.
+    const selectedPackIds = Array.from(this.state.selectedPackIds);
+    const useBase = selectedPackIds.includes("base");
+    const baseDie    = useBase ? DIE_CARDS    : [];
+    const baseLiving = useBase ? LIVING_CARDS : [];
+    const baseBye    = useBase ? BYE_CARDS    : [];
+    const expansionRaw = getCardsByPackIds(selectedPackIds);
+    const expansion = expansionCardsToCardData(expansionRaw);
+    const merged = mergeDecks(baseDie, baseLiving, baseBye, expansion);
+    console.log(
+      `[GameRoom] Packs: ${selectedPackIds.join(',') || 'none'}; ` +
+      `deck sizes die=${merged.die.length} living=${merged.living.length} bye=${merged.bye.length}`
+    );
+
+    const shuffledDieDeck = shuffle(createDeck(merged.die, "die"));
+    const shuffledLivingDeck = shuffle(createDeck(merged.living, "living"));
+    const shuffledByeDeck = shuffle(createDeck(merged.bye, "bye"));
 
     shuffledDieDeck.forEach((card) => this.state.dieDeck.push(card));
     shuffledLivingDeck.forEach((card) => this.state.livingDeck.push(card));
