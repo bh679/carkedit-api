@@ -55,6 +55,10 @@ export class GameState extends Schema {
 
   // Expansion packs selected for this game (host-editable in lobby)
   @type(["string"]) selectedPackIds = new ArraySchema<string>();
+  // Per-pack disabled decks. Each entry is `${packId}:${deck}` where deck is
+  // "die" | "live" | "bye". Absence of an entry = that deck is enabled
+  // (default-all). Cleared automatically when a pack is unselected.
+  @type(["string"]) disabledPackDecks = new ArraySchema<string>();
 
   // Eulogy (Phase 4) state
   @type("string") currentWildcardPlayer: string = "";
