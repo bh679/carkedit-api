@@ -144,7 +144,8 @@ export function initDatabase(): void {
     );
     CREATE INDEX IF NOT EXISTS idx_packs_creator ON expansion_packs(creator_id);
     CREATE INDEX IF NOT EXISTS idx_packs_visibility_status ON expansion_packs(visibility, status);
-    CREATE INDEX IF NOT EXISTS idx_packs_official ON expansion_packs(is_official);
+    -- idx_packs_official is created in the migration block below, after the
+    -- is_official column is guaranteed to exist on pre-existing DBs.
 
     CREATE TABLE IF NOT EXISTS pack_favorites (
       user_id TEXT NOT NULL REFERENCES users(id),
