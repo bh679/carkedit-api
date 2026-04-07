@@ -7,7 +7,7 @@ import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
 import { initDatabase, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag } from "./db/users.js";
-import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial } from "./db/packs.js";
+import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, getPackStats } from "./db/packs.js";
 import { optionalAuth, requireAuth, requireAdmin, setFirebaseAvailable } from "./middleware/auth.js";
 import type { GameResult, IssueReport } from "./db/types.js";
 
@@ -379,11 +379,15 @@ const server = defineServer({
     app.get("/api/carkedit/packs", (_req: any, res: any) => {
       try {
         const officialParam = _req.query.is_official as string | undefined;
+        const sortParam = (_req.query.sort as string) || 'newest';
+        const sort = (['newest', 'most_used', 'most_saved'].includes(sortParam) ? sortParam : 'newest') as 'newest' | 'most_used' | 'most_saved';
         const result = listPacks({
           creator_id: _req.query.creator_id as string || undefined,
           visibility: _req.query.visibility as string || undefined,
           status: _req.query.status as string || undefined,
           is_official: officialParam === undefined ? undefined : officialParam === 'true' || officialParam === '1',
+          search: (_req.query.search as string) || undefined,
+          sort,
           viewer_id: _req.localUser?.id,
           limit: Math.min(parseInt(_req.query.limit as string) || 50, 100),
           offset: parseInt(_req.query.offset as string) || 0,
@@ -438,6 +442,18 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Set pack official error:", err);
         res.status(500).json({ error: "Failed to set pack official" });
+      }
+    });
+
+    // Must be registered BEFORE /packs/:id so the literal path wins.
+    app.get("/api/carkedit/packs/:id/stats", (req: any, res: any) => {
+      try {
+        const stats = getPackStats(req.params.id);
+        if (!stats) return res.status(404).json({ error: "Pack not found" });
+        res.json(stats);
+      } catch (err) {
+        console.error("[CarkedIt API] Pack stats error:", err);
+        res.status(500).json({ error: "Failed to retrieve pack stats" });
       }
     });
 

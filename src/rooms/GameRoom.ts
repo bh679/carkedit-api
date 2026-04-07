@@ -3,7 +3,7 @@ import { Room, Client } from "colyseus";
 import { GameState } from "../schema/GameState.js";
 import { Player } from "../schema/Player.js";
 import { shuffle, createDeck, expansionCardsToCardData, mergeDecks } from "../utils/deck.js";
-import { getCardsByPackIds } from "../db/packs.js";
+import { getCardsByPackIds, recordPackUsage } from "../db/packs.js";
 import { computeDodTurnOrder } from "../utils/turnOrder.js";
 import { DIE_CARDS, LIVING_CARDS, BYE_CARDS } from "../data/cards.js";
 import { handleRevealDie, handleEndDieTurn } from "../phases/DiePhase.js";
@@ -622,6 +622,18 @@ export class GameRoom extends Room<{ state: GameState }> {
     const baseDie    = useBase && isDeckEnabled("base", "die")  ? DIE_CARDS    : [];
     const baseLiving = useBase && isDeckEnabled("base", "live") ? LIVING_CARDS : [];
     const baseBye    = useBase && isDeckEnabled("base", "bye")  ? BYE_CARDS    : [];
+
+    // Record pack usage for marketplace analytics (non-base packs only).
+    // Wrapped in try/catch so analytics failures don't break room creation.
+    if (this._gameId) {
+      const gameId = this._gameId;
+      for (const packId of selectedPackIds) {
+        if (packId && packId !== "base") {
+          try { recordPackUsage(packId, gameId); }
+          catch (err) { console.warn(`[GameRoom] recordPackUsage failed for ${packId}:`, err); }
+        }
+      }
+    }
 
     const expansionRaw = getCardsByPackIds(selectedPackIds).filter((c) =>
       isDeckEnabled(c.pack_id, c.deck_type as "die" | "live" | "bye")
