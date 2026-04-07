@@ -61,7 +61,6 @@ function normalizePackRow<T extends { is_official: any; is_favorited?: any }>(ro
 
 export function listPacks(filters: {
   creator_id?: string;
-  visibility?: string;
   status?: string;
   is_official?: boolean;
   search?: string;
@@ -77,7 +76,6 @@ export function listPacks(filters: {
   const params: any[] = [];
 
   if (filters.creator_id) { conditions.push('ep.creator_id = ?'); params.push(filters.creator_id); }
-  if (filters.visibility) { conditions.push('ep.visibility = ?'); params.push(filters.visibility); }
   if (filters.status) { conditions.push('ep.status = ?'); params.push(filters.status); }
   if (filters.is_official !== undefined) { conditions.push('ep.is_official = ?'); params.push(filters.is_official ? 1 : 0); }
   if (filters.search && filters.search.trim()) {
@@ -206,7 +204,6 @@ export function setPackOfficial(packId: string, isOfficial: boolean): ExpansionP
 export function updatePack(id: string, updates: {
   title?: string;
   description?: string;
-  visibility?: string;
   status?: string;
   featured_card_id?: string | null;
 }): ExpansionPack | null {
@@ -215,13 +212,13 @@ export function updatePack(id: string, updates: {
   const pack = db.prepare('SELECT * FROM expansion_packs WHERE id = ?').get(id) as ExpansionPack | undefined;
   if (!pack) return null;
 
-  // Cannot publish or make public with 0 cards
-  if (updates.visibility === 'public' || updates.status === 'published') {
+  // Cannot publish a pack with 0 cards
+  if (updates.status === 'published') {
     const cardCount = (db.prepare(
       'SELECT COUNT(*) as count FROM expansion_cards WHERE pack_id = ?'
     ).get(id) as { count: number }).count;
     if (cardCount === 0) {
-      throw new Error('Cannot publish or make public a pack with no cards');
+      throw new Error('Cannot publish a pack with no cards');
     }
   }
 
@@ -240,7 +237,6 @@ export function updatePack(id: string, updates: {
 
   if (updates.title !== undefined) { sets.push('title = ?'); params.push(updates.title); }
   if (updates.description !== undefined) { sets.push('description = ?'); params.push(updates.description); }
-  if (updates.visibility !== undefined) { sets.push('visibility = ?'); params.push(updates.visibility); }
   if (updates.status !== undefined) { sets.push('status = ?'); params.push(updates.status); }
   if (updates.featured_card_id !== undefined) { sets.push('featured_card_id = ?'); params.push(updates.featured_card_id); }
 

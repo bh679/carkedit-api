@@ -383,7 +383,6 @@ const server = defineServer({
         const sort = (['newest', 'most_used', 'most_saved'].includes(sortParam) ? sortParam : 'newest') as 'newest' | 'most_used' | 'most_saved';
         const result = listPacks({
           creator_id: _req.query.creator_id as string || undefined,
-          visibility: _req.query.visibility as string || undefined,
           status: _req.query.status as string || undefined,
           is_official: officialParam === undefined ? undefined : officialParam === 'true' || officialParam === '1',
           search: (_req.query.search as string) || undefined,
