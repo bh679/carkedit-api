@@ -156,7 +156,6 @@ export interface ExpansionPack {
   creator_id: string;
   title: string;
   description: string;
-  visibility: 'private' | 'public';
   status: 'draft' | 'published';
   is_official: boolean;
   is_favorited?: boolean;

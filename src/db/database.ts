@@ -135,7 +135,6 @@ export function initDatabase(): void {
       creator_id TEXT NOT NULL REFERENCES users(id),
       title TEXT NOT NULL,
       description TEXT DEFAULT '',
-      visibility TEXT NOT NULL DEFAULT 'private' CHECK(visibility IN ('private', 'public')),
       status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'published')),
       is_official INTEGER NOT NULL DEFAULT 0,
       version INTEGER NOT NULL DEFAULT 1,
@@ -144,7 +143,7 @@ export function initDatabase(): void {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_packs_creator ON expansion_packs(creator_id);
-    CREATE INDEX IF NOT EXISTS idx_packs_visibility_status ON expansion_packs(visibility, status);
+    CREATE INDEX IF NOT EXISTS idx_packs_status ON expansion_packs(status);
     -- idx_packs_official is created in the migration block below, after the
     -- is_official column is guaranteed to exist on pre-existing DBs.
 
@@ -216,6 +215,44 @@ export function initDatabase(): void {
   if (!packCols.includes('featured_card_id')) {
     // No FK on ALTER (SQLite limitation); deletion cleanup is enforced in deleteCard().
     db.exec('ALTER TABLE expansion_packs ADD COLUMN featured_card_id TEXT');
+  }
+
+  // Migrate: drop legacy `visibility` column from expansion_packs.
+  // The column was never written by any code path (every pack was stuck at
+  // 'private'), so the marketplace browse query — which required
+  // visibility='public' — never returned user packs. Removing the column
+  // collapses publish-vs-listed into a single `status` field.
+  //
+  // Hard-fail on startup if the migration cannot run, to make a misconfigured
+  // production SQLite impossible to miss (silent fallback would silently
+  // re-create the original "marketplace empty" bug).
+  if (packCols.includes('visibility')) {
+    const sqliteVersion = (db.prepare('SELECT sqlite_version() AS v').get() as { v: string }).v;
+    const [maj, min] = sqliteVersion.split('.').map((n) => parseInt(n, 10));
+    if (maj < 3 || (maj === 3 && min < 35)) {
+      throw new Error(
+        `[CarkedIt API] FATAL: SQLite ${sqliteVersion} too old to drop ` +
+        `expansion_packs.visibility column (need 3.35+). Upgrade better-sqlite3 ` +
+        `or run the migration manually.`
+      );
+    }
+    try {
+      db.exec('DROP INDEX IF EXISTS idx_packs_visibility_status');
+      db.exec('ALTER TABLE expansion_packs DROP COLUMN visibility');
+    } catch (err: any) {
+      throw new Error(
+        `[CarkedIt API] FATAL: pack-visibility migration failed: ${err?.message || err}`
+      );
+    }
+    const after = db.prepare("PRAGMA table_info(expansion_packs)").all().map((c: any) => c.name);
+    if (after.includes('visibility')) {
+      throw new Error(
+        '[CarkedIt API] FATAL: pack-visibility migration appeared to succeed ' +
+        'but column still present'
+      );
+    }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_packs_status ON expansion_packs(status)');
+    console.log('[CarkedIt API] Migration: dropped expansion_packs.visibility column');
   }
 }
 
