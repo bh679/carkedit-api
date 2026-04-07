@@ -7,7 +7,7 @@ import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
 import { initDatabase, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag } from "./db/users.js";
-import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, getPackStats } from "./db/packs.js";
+import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, getPackStats } from "./db/packs.js";
 import { optionalAuth, requireAuth, requireAdmin, setFirebaseAvailable } from "./middleware/auth.js";
 import type { GameResult, IssueReport } from "./db/types.js";
 
@@ -379,6 +379,7 @@ const server = defineServer({
     app.get("/api/carkedit/packs", (_req: any, res: any) => {
       try {
         const officialParam = _req.query.is_official as string | undefined;
+        const devParam = _req.query.is_dev as string | undefined;
         const sortParam = (_req.query.sort as string) || 'newest';
         const sort = (['newest', 'most_used', 'most_saved'].includes(sortParam) ? sortParam : 'newest') as 'newest' | 'most_used' | 'most_saved';
         const result = listPacks({
@@ -386,6 +387,7 @@ const server = defineServer({
           visibility: _req.query.visibility as string || undefined,
           status: _req.query.status as string || undefined,
           is_official: officialParam === undefined ? undefined : officialParam === 'true' || officialParam === '1',
+          is_dev: devParam === undefined ? undefined : devParam === 'true' || devParam === '1',
           search: (_req.query.search as string) || undefined,
           sort,
           viewer_id: _req.localUser?.id,
@@ -442,6 +444,21 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Set pack official error:", err);
         res.status(500).json({ error: "Failed to set pack official" });
+      }
+    });
+
+    app.patch("/api/carkedit/packs/:id/dev", requireAdmin(), (req: any, res: any) => {
+      try {
+        const { is_dev } = req.body;
+        if (typeof is_dev !== 'boolean') {
+          return res.status(400).json({ error: "is_dev (boolean) is required" });
+        }
+        const pack = setPackDev(req.params.id, is_dev);
+        if (!pack) return res.status(404).json({ error: "Pack not found" });
+        res.json(pack);
+      } catch (err) {
+        console.error("[CarkedIt API] Set pack dev error:", err);
+        res.status(500).json({ error: "Failed to set pack dev" });
       }
     });
 

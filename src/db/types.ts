@@ -159,6 +159,7 @@ export interface ExpansionPack {
   visibility: 'private' | 'public';
   status: 'draft' | 'published';
   is_official: boolean;
+  is_dev: boolean;
   is_favorited?: boolean;
   version: number;
   featured_card_id: string | null;
