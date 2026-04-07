@@ -42,13 +42,13 @@ const server = defineServer({
 
     // Force browsers to revalidate HTML pages (picks up new versioned asset URLs)
     app.use((req, res, next) => {
-      if (req.path.endsWith('.html') || req.path === '/') {
+      if (req.path.endsWith('.html') || req.path === '/' || !path.extname(req.path)) {
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       }
       next();
     });
 
-    app.use(express.static(clientDir));
+    app.use(express.static(clientDir, { extensions: ['html'] }));
 
     // Apply optional auth to pack and user routes
     app.use('/api/carkedit/packs', optionalAuth());
