@@ -382,12 +382,16 @@ const server = defineServer({
         const devParam = _req.query.is_dev as string | undefined;
         const sortParam = (_req.query.sort as string) || 'newest';
         const sort = (['newest', 'most_used', 'most_saved'].includes(sortParam) ? sortParam : 'newest') as 'newest' | 'most_used' | 'most_saved';
+        const isAdmin = !!_req.localUser?.is_admin;
+        const requestedDev = devParam === undefined ? undefined : devParam === 'true' || devParam === '1';
+        // Non-admin viewers never see dev decks in search results.
+        const effectiveDev = isAdmin ? requestedDev : false;
         const result = listPacks({
           creator_id: _req.query.creator_id as string || undefined,
           visibility: _req.query.visibility as string || undefined,
           status: _req.query.status as string || undefined,
           is_official: officialParam === undefined ? undefined : officialParam === 'true' || officialParam === '1',
-          is_dev: devParam === undefined ? undefined : devParam === 'true' || devParam === '1',
+          is_dev: effectiveDev,
           search: (_req.query.search as string) || undefined,
           sort,
           viewer_id: _req.localUser?.id,
