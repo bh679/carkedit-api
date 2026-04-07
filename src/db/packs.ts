@@ -46,6 +46,8 @@ type PackRow = ExpansionPack & {
   die_count: number;
   live_count: number;
   bye_count: number;
+  featured_card_text: string | null;
+  featured_card_deck: 'die' | 'live' | 'bye' | null;
 };
 
 function normalizePackRow<T extends { is_official: any; is_favorited?: any }>(row: T): T {
@@ -93,11 +95,14 @@ export function listPacks(filters: {
       COUNT(ec.id) as card_count,
       COALESCE(SUM(CASE WHEN ec.deck_type = 'die'  THEN 1 ELSE 0 END), 0) as die_count,
       COALESCE(SUM(CASE WHEN ec.deck_type = 'live' THEN 1 ELSE 0 END), 0) as live_count,
-      COALESCE(SUM(CASE WHEN ec.deck_type = 'bye'  THEN 1 ELSE 0 END), 0) as bye_count
+      COALESCE(SUM(CASE WHEN ec.deck_type = 'bye'  THEN 1 ELSE 0 END), 0) as bye_count,
+      fc.text as featured_card_text,
+      fc.deck_type as featured_card_deck
       ${favSelect}
     FROM expansion_packs ep
     ${favJoin}
     LEFT JOIN expansion_cards ec ON ec.pack_id = ep.id
+    LEFT JOIN expansion_cards fc ON fc.id = ep.featured_card_id
     ${where}
     GROUP BY ep.id
     ORDER BY ep.created_at DESC
@@ -115,10 +120,13 @@ export function listUserFavorites(viewerId: string): PackRow[] {
       COALESCE(SUM(CASE WHEN ec.deck_type = 'die'  THEN 1 ELSE 0 END), 0) as die_count,
       COALESCE(SUM(CASE WHEN ec.deck_type = 'live' THEN 1 ELSE 0 END), 0) as live_count,
       COALESCE(SUM(CASE WHEN ec.deck_type = 'bye'  THEN 1 ELSE 0 END), 0) as bye_count,
+      fc.text as featured_card_text,
+      fc.deck_type as featured_card_deck,
       1 as is_favorited
     FROM expansion_packs ep
     INNER JOIN pack_favorites pf ON pf.pack_id = ep.id AND pf.user_id = ?
     LEFT JOIN expansion_cards ec ON ec.pack_id = ep.id
+    LEFT JOIN expansion_cards fc ON fc.id = ep.featured_card_id
     GROUP BY ep.id
     ORDER BY pf.created_at DESC
   `).all(viewerId) as PackRow[];
