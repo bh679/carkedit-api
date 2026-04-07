@@ -202,6 +202,7 @@ export function updatePack(id: string, updates: {
   description?: string;
   visibility?: string;
   status?: string;
+  feature_card_id?: string | null;
 }): ExpansionPack | null {
   const db = getDb();
 
@@ -218,6 +219,16 @@ export function updatePack(id: string, updates: {
     }
   }
 
+  // Validate feature_card_id belongs to this pack (or is null to clear)
+  if (updates.feature_card_id !== undefined && updates.feature_card_id !== null) {
+    const card = db.prepare(
+      'SELECT id FROM expansion_cards WHERE id = ? AND pack_id = ?'
+    ).get(updates.feature_card_id, id);
+    if (!card) {
+      throw new Error('feature_card_id must reference a card belonging to this pack');
+    }
+  }
+
   const sets: string[] = [];
   const params: any[] = [];
 
@@ -225,6 +236,7 @@ export function updatePack(id: string, updates: {
   if (updates.description !== undefined) { sets.push('description = ?'); params.push(updates.description); }
   if (updates.visibility !== undefined) { sets.push('visibility = ?'); params.push(updates.visibility); }
   if (updates.status !== undefined) { sets.push('status = ?'); params.push(updates.status); }
+  if (updates.feature_card_id !== undefined) { sets.push('feature_card_id = ?'); params.push(updates.feature_card_id); }
 
   if (sets.length === 0) return normalizePackRow(pack as any);
 

@@ -160,6 +160,7 @@ export interface ExpansionPack {
   status: 'draft' | 'published';
   is_official: boolean;
   is_favorited?: boolean;
+  feature_card_id: string | null;
   version: number;
   created_at: string;
   updated_at: string;

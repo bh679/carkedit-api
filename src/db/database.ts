@@ -138,6 +138,7 @@ export function initDatabase(): void {
       visibility TEXT NOT NULL DEFAULT 'private' CHECK(visibility IN ('private', 'public')),
       status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'published')),
       is_official INTEGER NOT NULL DEFAULT 0,
+      feature_card_id TEXT,
       version INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -211,6 +212,9 @@ export function initDatabase(): void {
   if (!packCols.includes('is_official')) {
     db.exec('ALTER TABLE expansion_packs ADD COLUMN is_official INTEGER NOT NULL DEFAULT 0');
     db.exec('CREATE INDEX IF NOT EXISTS idx_packs_official ON expansion_packs(is_official)');
+  }
+  if (!packCols.includes('feature_card_id')) {
+    db.exec('ALTER TABLE expansion_packs ADD COLUMN feature_card_id TEXT');
   }
 }
 
