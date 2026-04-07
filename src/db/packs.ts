@@ -17,13 +17,22 @@ export function createPack(data: {
     VALUES (?, ?, ?, ?)
   `).run(id, data.creator_id, data.title, data.description ?? '');
 
-  return db.prepare('SELECT * FROM expansion_packs WHERE id = ?').get(id) as ExpansionPack;
+  const row = db.prepare('SELECT * FROM expansion_packs WHERE id = ?').get(id) as ExpansionPack;
+  return normalizePackRow(row as any);
 }
 
-export function getPackById(id: string): PackWithCards | null {
+export function getPackById(id: string, viewerId?: string): PackWithCards | null {
   const db = getDb();
   const pack = db.prepare('SELECT * FROM expansion_packs WHERE id = ?').get(id) as ExpansionPack | undefined;
   if (!pack) return null;
+  normalizePackRow(pack as any);
+
+  if (viewerId) {
+    const fav = db.prepare(
+      'SELECT 1 FROM pack_favorites WHERE user_id = ? AND pack_id = ?'
+    ).get(viewerId, id);
+    (pack as any).is_favorited = !!fav;
+  }
 
   const cards = db.prepare(
     'SELECT * FROM expansion_cards WHERE pack_id = ? ORDER BY sort_order ASC, created_at ASC'
@@ -32,15 +41,30 @@ export function getPackById(id: string): PackWithCards | null {
   return { ...pack, cards };
 }
 
+type PackRow = ExpansionPack & {
+  card_count: number;
+  die_count: number;
+  live_count: number;
+  bye_count: number;
+};
+
+function normalizePackRow<T extends { is_official: any; is_favorited?: any }>(row: T): T {
+  row.is_official = !!row.is_official;
+  if (row.is_favorited !== undefined) row.is_favorited = !!row.is_favorited;
+  return row;
+}
+
 export function listPacks(filters: {
   creator_id?: string;
   visibility?: string;
   status?: string;
+  is_official?: boolean;
+  viewer_id?: string;
   limit?: number;
   offset?: number;
-}): { packs: (ExpansionPack & { card_count: number; die_count: number; live_count: number; bye_count: number })[]; total: number } {
+}): { packs: PackRow[]; total: number } {
   const db = getDb();
-  const { limit = 50, offset = 0 } = filters;
+  const { limit = 50, offset = 0, viewer_id } = filters;
 
   const conditions: string[] = [];
   const params: any[] = [];
@@ -48,6 +72,7 @@ export function listPacks(filters: {
   if (filters.creator_id) { conditions.push('ep.creator_id = ?'); params.push(filters.creator_id); }
   if (filters.visibility) { conditions.push('ep.visibility = ?'); params.push(filters.visibility); }
   if (filters.status) { conditions.push('ep.status = ?'); params.push(filters.status); }
+  if (filters.is_official !== undefined) { conditions.push('ep.is_official = ?'); params.push(filters.is_official ? 1 : 0); }
 
   const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
 
@@ -55,21 +80,73 @@ export function listPacks(filters: {
     `SELECT COUNT(*) as count FROM expansion_packs ep ${where}`
   ).get(...params) as { count: number }).count;
 
+  const favSelect = viewer_id
+    ? ', CASE WHEN pf.user_id IS NULL THEN 0 ELSE 1 END as is_favorited'
+    : '';
+  const favJoin = viewer_id
+    ? 'LEFT JOIN pack_favorites pf ON pf.pack_id = ep.id AND pf.user_id = ?'
+    : '';
+  const favParams = viewer_id ? [viewer_id] : [];
+
   const packs = db.prepare(`
     SELECT ep.*,
       COUNT(ec.id) as card_count,
       COALESCE(SUM(CASE WHEN ec.deck_type = 'die'  THEN 1 ELSE 0 END), 0) as die_count,
       COALESCE(SUM(CASE WHEN ec.deck_type = 'live' THEN 1 ELSE 0 END), 0) as live_count,
       COALESCE(SUM(CASE WHEN ec.deck_type = 'bye'  THEN 1 ELSE 0 END), 0) as bye_count
+      ${favSelect}
     FROM expansion_packs ep
+    ${favJoin}
     LEFT JOIN expansion_cards ec ON ec.pack_id = ep.id
     ${where}
     GROUP BY ep.id
     ORDER BY ep.created_at DESC
     LIMIT ? OFFSET ?
-  `).all(...params, limit, offset) as (ExpansionPack & { card_count: number; die_count: number; live_count: number; bye_count: number })[];
+  `).all(...favParams, ...params, limit, offset) as PackRow[];
 
-  return { packs, total };
+  return { packs: packs.map(normalizePackRow), total };
+}
+
+export function listUserFavorites(viewerId: string): PackRow[] {
+  const db = getDb();
+  const packs = db.prepare(`
+    SELECT ep.*,
+      COUNT(ec.id) as card_count,
+      COALESCE(SUM(CASE WHEN ec.deck_type = 'die'  THEN 1 ELSE 0 END), 0) as die_count,
+      COALESCE(SUM(CASE WHEN ec.deck_type = 'live' THEN 1 ELSE 0 END), 0) as live_count,
+      COALESCE(SUM(CASE WHEN ec.deck_type = 'bye'  THEN 1 ELSE 0 END), 0) as bye_count,
+      1 as is_favorited
+    FROM expansion_packs ep
+    INNER JOIN pack_favorites pf ON pf.pack_id = ep.id AND pf.user_id = ?
+    LEFT JOIN expansion_cards ec ON ec.pack_id = ep.id
+    GROUP BY ep.id
+    ORDER BY pf.created_at DESC
+  `).all(viewerId) as PackRow[];
+  return packs.map(normalizePackRow);
+}
+
+export function addFavorite(userId: string, packId: string): void {
+  const db = getDb();
+  db.prepare(
+    'INSERT OR IGNORE INTO pack_favorites (user_id, pack_id) VALUES (?, ?)'
+  ).run(userId, packId);
+}
+
+export function removeFavorite(userId: string, packId: string): void {
+  const db = getDb();
+  db.prepare(
+    'DELETE FROM pack_favorites WHERE user_id = ? AND pack_id = ?'
+  ).run(userId, packId);
+}
+
+export function setPackOfficial(packId: string, isOfficial: boolean): ExpansionPack | null {
+  const db = getDb();
+  const result = db.prepare(
+    "UPDATE expansion_packs SET is_official = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(isOfficial ? 1 : 0, packId);
+  if (result.changes === 0) return null;
+  const row = db.prepare('SELECT * FROM expansion_packs WHERE id = ?').get(packId) as ExpansionPack;
+  return normalizePackRow(row as any);
 }
 
 export function updatePack(id: string, updates: {
@@ -101,13 +178,14 @@ export function updatePack(id: string, updates: {
   if (updates.visibility !== undefined) { sets.push('visibility = ?'); params.push(updates.visibility); }
   if (updates.status !== undefined) { sets.push('status = ?'); params.push(updates.status); }
 
-  if (sets.length === 0) return pack;
+  if (sets.length === 0) return normalizePackRow(pack as any);
 
   sets.push("updated_at = datetime('now')");
   params.push(id);
 
   db.prepare(`UPDATE expansion_packs SET ${sets.join(', ')} WHERE id = ?`).run(...params);
-  return db.prepare('SELECT * FROM expansion_packs WHERE id = ?').get(id) as ExpansionPack;
+  const row = db.prepare('SELECT * FROM expansion_packs WHERE id = ?').get(id) as ExpansionPack;
+  return normalizePackRow(row as any);
 }
 
 export function deletePack(id: string): boolean {

@@ -7,7 +7,7 @@ import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
 import { initDatabase, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag } from "./db/users.js";
-import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard } from "./db/packs.js";
+import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial } from "./db/packs.js";
 import { optionalAuth, requireAuth, requireAdmin, setFirebaseAvailable } from "./middleware/auth.js";
 import type { GameResult, IssueReport } from "./db/types.js";
 
@@ -378,10 +378,13 @@ const server = defineServer({
 
     app.get("/api/carkedit/packs", (_req: any, res: any) => {
       try {
+        const officialParam = _req.query.is_official as string | undefined;
         const result = listPacks({
           creator_id: _req.query.creator_id as string || undefined,
           visibility: _req.query.visibility as string || undefined,
           status: _req.query.status as string || undefined,
+          is_official: officialParam === undefined ? undefined : officialParam === 'true' || officialParam === '1',
+          viewer_id: _req.localUser?.id,
           limit: Math.min(parseInt(_req.query.limit as string) || 50, 100),
           offset: parseInt(_req.query.offset as string) || 0,
         });
@@ -392,9 +395,55 @@ const server = defineServer({
       }
     });
 
+    // Must be registered BEFORE /packs/:id so the literal path wins.
+    app.get("/api/carkedit/packs/favorites", requireAuth(), (req: any, res: any) => {
+      try {
+        const packs = listUserFavorites(req.localUser.id);
+        res.json({ packs, total: packs.length });
+      } catch (err) {
+        console.error("[CarkedIt API] List favorite packs error:", err);
+        res.status(500).json({ error: "Failed to retrieve favorite packs" });
+      }
+    });
+
+    app.post("/api/carkedit/packs/:id/favorite", requireAuth(), (req: any, res: any) => {
+      try {
+        addFavorite(req.localUser.id, req.params.id);
+        res.status(204).end();
+      } catch (err) {
+        console.error("[CarkedIt API] Favorite pack error:", err);
+        res.status(500).json({ error: "Failed to favorite pack" });
+      }
+    });
+
+    app.delete("/api/carkedit/packs/:id/favorite", requireAuth(), (req: any, res: any) => {
+      try {
+        removeFavorite(req.localUser.id, req.params.id);
+        res.status(204).end();
+      } catch (err) {
+        console.error("[CarkedIt API] Unfavorite pack error:", err);
+        res.status(500).json({ error: "Failed to unfavorite pack" });
+      }
+    });
+
+    app.patch("/api/carkedit/packs/:id/official", requireAdmin(), (req: any, res: any) => {
+      try {
+        const { is_official } = req.body;
+        if (typeof is_official !== 'boolean') {
+          return res.status(400).json({ error: "is_official (boolean) is required" });
+        }
+        const pack = setPackOfficial(req.params.id, is_official);
+        if (!pack) return res.status(404).json({ error: "Pack not found" });
+        res.json(pack);
+      } catch (err) {
+        console.error("[CarkedIt API] Set pack official error:", err);
+        res.status(500).json({ error: "Failed to set pack official" });
+      }
+    });
+
     app.get("/api/carkedit/packs/:id", (req: any, res: any) => {
       try {
-        const pack = getPackById(req.params.id);
+        const pack = getPackById(req.params.id, req.localUser?.id);
         if (!pack) return res.status(404).json({ error: "Pack not found" });
         res.json(pack);
       } catch (err) {

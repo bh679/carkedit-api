@@ -158,6 +158,8 @@ export interface ExpansionPack {
   description: string;
   visibility: 'private' | 'public';
   status: 'draft' | 'published';
+  is_official: boolean;
+  is_favorited?: boolean;
   version: number;
   created_at: string;
   updated_at: string;
