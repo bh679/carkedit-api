@@ -137,12 +137,22 @@ export function initDatabase(): void {
       description TEXT DEFAULT '',
       visibility TEXT NOT NULL DEFAULT 'private' CHECK(visibility IN ('private', 'public')),
       status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'published')),
+      is_official INTEGER NOT NULL DEFAULT 0,
       version INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_packs_creator ON expansion_packs(creator_id);
     CREATE INDEX IF NOT EXISTS idx_packs_visibility_status ON expansion_packs(visibility, status);
+    CREATE INDEX IF NOT EXISTS idx_packs_official ON expansion_packs(is_official);
+
+    CREATE TABLE IF NOT EXISTS pack_favorites (
+      user_id TEXT NOT NULL REFERENCES users(id),
+      pack_id TEXT NOT NULL REFERENCES expansion_packs(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, pack_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_favorites_user ON pack_favorites(user_id);
 
     CREATE TABLE IF NOT EXISTS expansion_cards (
       id TEXT PRIMARY KEY,
@@ -184,6 +194,13 @@ export function initDatabase(): void {
   }
   if (!userCols.includes('birth_day')) {
     db.exec('ALTER TABLE users ADD COLUMN birth_day INTEGER NOT NULL DEFAULT 0');
+  }
+
+  // Migrate: add is_official column to expansion_packs (for existing DBs)
+  const packCols = db.prepare("PRAGMA table_info(expansion_packs)").all().map((c: any) => c.name);
+  if (!packCols.includes('is_official')) {
+    db.exec('ALTER TABLE expansion_packs ADD COLUMN is_official INTEGER NOT NULL DEFAULT 0');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_packs_official ON expansion_packs(is_official)');
   }
 }
 
