@@ -206,7 +206,42 @@ export class GameRoom extends Room<{ state: GameState }> {
       const ids = Array.isArray(data?.packIds) ? data.packIds.filter((x) => typeof x === "string") : [];
       this.state.selectedPackIds.clear();
       for (const id of ids) this.state.selectedPackIds.push(id);
+      // Drop any disabled-deck entries belonging to packs no longer selected.
+      const allowed = new Set(ids);
+      const kept = Array.from(this.state.disabledPackDecks).filter((key) => {
+        const idx = key.lastIndexOf(":");
+        if (idx < 0) return false;
+        return allowed.has(key.slice(0, idx));
+      });
+      this.state.disabledPackDecks.clear();
+      for (const k of kept) this.state.disabledPackDecks.push(k);
       this.logEvent(client, "packs_selected", { packIds: ids });
+    });
+
+    this.onMessage("set_pack_decks", (client, data: { packId: string; decks: ("die" | "live" | "bye")[] }) => {
+      if (this.state.hostId && this.state.hostId !== client.sessionId) return;
+      if (this.state.phase !== "lobby") return;
+      const packId = typeof data?.packId === "string" ? data.packId : "";
+      if (!packId) return;
+      // Pack must currently be selected
+      if (!Array.from(this.state.selectedPackIds).includes(packId)) return;
+      const valid = new Set(["die", "live", "bye"]);
+      const enabled = new Set(
+        Array.isArray(data?.decks)
+          ? data.decks.filter((d) => typeof d === "string" && valid.has(d))
+          : []
+      );
+      // Rebuild disabledPackDecks: keep entries for other packs, replace this pack's entries.
+      const kept = Array.from(this.state.disabledPackDecks).filter((key) => {
+        const idx = key.lastIndexOf(":");
+        return idx > 0 && key.slice(0, idx) !== packId;
+      });
+      const newDisabled = (["die", "live", "bye"] as const)
+        .filter((d) => !enabled.has(d))
+        .map((d) => `${packId}:${d}`);
+      this.state.disabledPackDecks.clear();
+      for (const k of [...kept, ...newDisabled]) this.state.disabledPackDecks.push(k);
+      this.logEvent(client, "pack_decks_set", { packId, decks: Array.from(enabled) });
     });
 
     // Eulogy (Phase 4) message handlers
@@ -579,15 +614,23 @@ export class GameRoom extends Room<{ state: GameState }> {
     // The base game is represented by the sentinel pack id "base" — if it's
     // not in selectedPackIds the host has chosen an expansion-only game.
     const selectedPackIds = Array.from(this.state.selectedPackIds);
+    const disabledSet = new Set(Array.from(this.state.disabledPackDecks));
+    const isDeckEnabled = (packId: string, deck: "die" | "live" | "bye") =>
+      !disabledSet.has(`${packId}:${deck}`);
+
     const useBase = selectedPackIds.includes("base");
-    const baseDie    = useBase ? DIE_CARDS    : [];
-    const baseLiving = useBase ? LIVING_CARDS : [];
-    const baseBye    = useBase ? BYE_CARDS    : [];
-    const expansionRaw = getCardsByPackIds(selectedPackIds);
+    const baseDie    = useBase && isDeckEnabled("base", "die")  ? DIE_CARDS    : [];
+    const baseLiving = useBase && isDeckEnabled("base", "live") ? LIVING_CARDS : [];
+    const baseBye    = useBase && isDeckEnabled("base", "bye")  ? BYE_CARDS    : [];
+
+    const expansionRaw = getCardsByPackIds(selectedPackIds).filter((c) =>
+      isDeckEnabled(c.pack_id, c.deck_type as "die" | "live" | "bye")
+    );
     const expansion = expansionCardsToCardData(expansionRaw);
     const merged = mergeDecks(baseDie, baseLiving, baseBye, expansion);
     console.log(
       `[GameRoom] Packs: ${selectedPackIds.join(',') || 'none'}; ` +
+      `disabledDecks: ${Array.from(disabledSet).join(',') || 'none'}; ` +
       `deck sizes die=${merged.die.length} living=${merged.living.length} bye=${merged.bye.length}`
     );
 
