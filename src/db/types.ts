@@ -162,6 +162,7 @@ export interface ExpansionPack {
   is_favorited?: boolean;
   feature_card_id: string | null;
   version: number;
+  featured_card_id: string | null;
   created_at: string;
   updated_at: string;
 }

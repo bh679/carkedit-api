@@ -46,6 +46,8 @@ type PackRow = ExpansionPack & {
   die_count: number;
   live_count: number;
   bye_count: number;
+  featured_card_text: string | null;
+  featured_card_deck: 'die' | 'live' | 'bye' | null;
   usage_count?: number;
   favorite_count?: number;
   creator_name?: string | null;
@@ -110,7 +112,9 @@ export function listPacks(filters: {
       (SELECT COUNT(*) FROM expansion_cards ec WHERE ec.pack_id = ep.id AND ec.deck_type = 'live') as live_count,
       (SELECT COUNT(*) FROM expansion_cards ec WHERE ec.pack_id = ep.id AND ec.deck_type = 'bye')  as bye_count,
       (SELECT COUNT(*) FROM pack_usage pu WHERE pu.pack_id = ep.id) as usage_count,
-      (SELECT COUNT(*) FROM pack_favorites pf2 WHERE pf2.pack_id = ep.id) as favorite_count
+      (SELECT COUNT(*) FROM pack_favorites pf2 WHERE pf2.pack_id = ep.id) as favorite_count,
+      (SELECT text      FROM expansion_cards WHERE id = ep.featured_card_id) as featured_card_text,
+      (SELECT deck_type FROM expansion_cards WHERE id = ep.featured_card_id) as featured_card_deck
       ${favSelect}
     FROM expansion_packs ep
     LEFT JOIN users u ON u.id = ep.creator_id
@@ -164,6 +168,8 @@ export function listUserFavorites(viewerId: string): PackRow[] {
       (SELECT COUNT(*) FROM expansion_cards ec WHERE ec.pack_id = ep.id AND ec.deck_type = 'bye')  as bye_count,
       (SELECT COUNT(*) FROM pack_usage pu WHERE pu.pack_id = ep.id) as usage_count,
       (SELECT COUNT(*) FROM pack_favorites pf2 WHERE pf2.pack_id = ep.id) as favorite_count,
+      (SELECT text      FROM expansion_cards WHERE id = ep.featured_card_id) as featured_card_text,
+      (SELECT deck_type FROM expansion_cards WHERE id = ep.featured_card_id) as featured_card_deck,
       1 as is_favorited
     FROM expansion_packs ep
     INNER JOIN pack_favorites pf ON pf.pack_id = ep.id AND pf.user_id = ?
@@ -202,7 +208,7 @@ export function updatePack(id: string, updates: {
   description?: string;
   visibility?: string;
   status?: string;
-  feature_card_id?: string | null;
+  featured_card_id?: string | null;
 }): ExpansionPack | null {
   const db = getDb();
 
@@ -219,13 +225,13 @@ export function updatePack(id: string, updates: {
     }
   }
 
-  // Validate feature_card_id belongs to this pack (or is null to clear)
-  if (updates.feature_card_id !== undefined && updates.feature_card_id !== null) {
-    const card = db.prepare(
-      'SELECT id FROM expansion_cards WHERE id = ? AND pack_id = ?'
-    ).get(updates.feature_card_id, id);
-    if (!card) {
-      throw new Error('feature_card_id must reference a card belonging to this pack');
+  // Validate featured_card_id belongs to this pack
+  if (updates.featured_card_id !== undefined && updates.featured_card_id !== null) {
+    const owned = db.prepare(
+      'SELECT 1 FROM expansion_cards WHERE id = ? AND pack_id = ?'
+    ).get(updates.featured_card_id, id);
+    if (!owned) {
+      throw new Error('featured_card_id must reference a card belonging to this pack');
     }
   }
 
@@ -236,7 +242,7 @@ export function updatePack(id: string, updates: {
   if (updates.description !== undefined) { sets.push('description = ?'); params.push(updates.description); }
   if (updates.visibility !== undefined) { sets.push('visibility = ?'); params.push(updates.visibility); }
   if (updates.status !== undefined) { sets.push('status = ?'); params.push(updates.status); }
-  if (updates.feature_card_id !== undefined) { sets.push('feature_card_id = ?'); params.push(updates.feature_card_id); }
+  if (updates.featured_card_id !== undefined) { sets.push('featured_card_id = ?'); params.push(updates.featured_card_id); }
 
   if (sets.length === 0) return normalizePackRow(pack as any);
 
@@ -321,6 +327,11 @@ export function updateCard(packId: string, cardId: string, updates: {
 
 export function deleteCard(packId: string, cardId: string): boolean {
   const db = getDb();
+  // If this card is the pack's featured card, clear it (defense in depth — the
+  // ALTER-added column has no FK, so we enforce this in code).
+  db.prepare(
+    "UPDATE expansion_packs SET featured_card_id = NULL, updated_at = datetime('now') WHERE id = ? AND featured_card_id = ?"
+  ).run(packId, cardId);
   const result = db.prepare('DELETE FROM expansion_cards WHERE id = ? AND pack_id = ?').run(cardId, packId);
   return result.changes > 0;
 }
