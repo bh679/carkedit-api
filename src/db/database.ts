@@ -156,6 +156,15 @@ export function initDatabase(): void {
     );
     CREATE INDEX IF NOT EXISTS idx_favorites_user ON pack_favorites(user_id);
 
+    CREATE TABLE IF NOT EXISTS pack_usage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pack_id TEXT NOT NULL REFERENCES expansion_packs(id) ON DELETE CASCADE,
+      game_id TEXT NOT NULL,
+      used_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_pack_usage_pack ON pack_usage(pack_id);
+    CREATE INDEX IF NOT EXISTS idx_pack_usage_game ON pack_usage(game_id);
+
     CREATE TABLE IF NOT EXISTS expansion_cards (
       id TEXT PRIMARY KEY,
       pack_id TEXT NOT NULL REFERENCES expansion_packs(id) ON DELETE CASCADE,

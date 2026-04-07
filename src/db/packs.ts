@@ -48,6 +48,9 @@ type PackRow = ExpansionPack & {
   bye_count: number;
   featured_card_text: string | null;
   featured_card_deck: 'die' | 'live' | 'bye' | null;
+  usage_count?: number;
+  favorite_count?: number;
+  creator_name?: string | null;
 };
 
 function normalizePackRow<T extends { is_official: any; is_favorited?: any }>(row: T): T {
@@ -61,12 +64,14 @@ export function listPacks(filters: {
   visibility?: string;
   status?: string;
   is_official?: boolean;
+  search?: string;
+  sort?: 'newest' | 'most_used' | 'most_saved';
   viewer_id?: string;
   limit?: number;
   offset?: number;
 }): { packs: PackRow[]; total: number } {
   const db = getDb();
-  const { limit = 50, offset = 0, viewer_id } = filters;
+  const { limit = 50, offset = 0, viewer_id, sort = 'newest' } = filters;
 
   const conditions: string[] = [];
   const params: any[] = [];
@@ -75,11 +80,16 @@ export function listPacks(filters: {
   if (filters.visibility) { conditions.push('ep.visibility = ?'); params.push(filters.visibility); }
   if (filters.status) { conditions.push('ep.status = ?'); params.push(filters.status); }
   if (filters.is_official !== undefined) { conditions.push('ep.is_official = ?'); params.push(filters.is_official ? 1 : 0); }
+  if (filters.search && filters.search.trim()) {
+    const term = `%${filters.search.trim()}%`;
+    conditions.push('(ep.title LIKE ? OR ep.description LIKE ? OR u.display_name LIKE ?)');
+    params.push(term, term, term);
+  }
 
   const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
 
   const total = (db.prepare(
-    `SELECT COUNT(*) as count FROM expansion_packs ep ${where}`
+    `SELECT COUNT(*) as count FROM expansion_packs ep LEFT JOIN users u ON u.id = ep.creator_id ${where}`
   ).get(...params) as { count: number }).count;
 
   const favSelect = viewer_id
@@ -90,44 +100,80 @@ export function listPacks(filters: {
     : '';
   const favParams = viewer_id ? [viewer_id] : [];
 
+  let orderBy = 'ep.created_at DESC';
+  if (sort === 'most_used') orderBy = 'usage_count DESC, ep.created_at DESC';
+  if (sort === 'most_saved') orderBy = 'favorite_count DESC, ep.created_at DESC';
+
   const packs = db.prepare(`
     SELECT ep.*,
-      COUNT(ec.id) as card_count,
-      COALESCE(SUM(CASE WHEN ec.deck_type = 'die'  THEN 1 ELSE 0 END), 0) as die_count,
-      COALESCE(SUM(CASE WHEN ec.deck_type = 'live' THEN 1 ELSE 0 END), 0) as live_count,
-      COALESCE(SUM(CASE WHEN ec.deck_type = 'bye'  THEN 1 ELSE 0 END), 0) as bye_count,
-      fc.text as featured_card_text,
-      fc.deck_type as featured_card_deck
+      u.display_name as creator_name,
+      (SELECT COUNT(*) FROM expansion_cards ec WHERE ec.pack_id = ep.id) as card_count,
+      (SELECT COUNT(*) FROM expansion_cards ec WHERE ec.pack_id = ep.id AND ec.deck_type = 'die')  as die_count,
+      (SELECT COUNT(*) FROM expansion_cards ec WHERE ec.pack_id = ep.id AND ec.deck_type = 'live') as live_count,
+      (SELECT COUNT(*) FROM expansion_cards ec WHERE ec.pack_id = ep.id AND ec.deck_type = 'bye')  as bye_count,
+      (SELECT COUNT(*) FROM pack_usage pu WHERE pu.pack_id = ep.id) as usage_count,
+      (SELECT COUNT(*) FROM pack_favorites pf2 WHERE pf2.pack_id = ep.id) as favorite_count,
+      (SELECT text      FROM expansion_cards WHERE id = ep.featured_card_id) as featured_card_text,
+      (SELECT deck_type FROM expansion_cards WHERE id = ep.featured_card_id) as featured_card_deck
       ${favSelect}
     FROM expansion_packs ep
+    LEFT JOIN users u ON u.id = ep.creator_id
     ${favJoin}
-    LEFT JOIN expansion_cards ec ON ec.pack_id = ep.id
-    LEFT JOIN expansion_cards fc ON fc.id = ep.featured_card_id
     ${where}
-    GROUP BY ep.id
-    ORDER BY ep.created_at DESC
+    ORDER BY ${orderBy}
     LIMIT ? OFFSET ?
   `).all(...favParams, ...params, limit, offset) as PackRow[];
 
   return { packs: packs.map(normalizePackRow), total };
 }
 
+export function getPackStats(packId: string): {
+  card_count: number;
+  die_count: number;
+  live_count: number;
+  bye_count: number;
+  usage_count: number;
+  favorite_count: number;
+} | null {
+  const db = getDb();
+  const pack = db.prepare('SELECT id FROM expansion_packs WHERE id = ?').get(packId);
+  if (!pack) return null;
+
+  return db.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM expansion_cards WHERE pack_id = ?) as card_count,
+      (SELECT COUNT(*) FROM expansion_cards WHERE pack_id = ? AND deck_type = 'die')  as die_count,
+      (SELECT COUNT(*) FROM expansion_cards WHERE pack_id = ? AND deck_type = 'live') as live_count,
+      (SELECT COUNT(*) FROM expansion_cards WHERE pack_id = ? AND deck_type = 'bye')  as bye_count,
+      (SELECT COUNT(*) FROM pack_usage     WHERE pack_id = ?) as usage_count,
+      (SELECT COUNT(*) FROM pack_favorites WHERE pack_id = ?) as favorite_count
+  `).get(packId, packId, packId, packId, packId, packId) as any;
+}
+
+export function recordPackUsage(packId: string, gameId: string): void {
+  const db = getDb();
+  db.prepare(
+    'INSERT INTO pack_usage (pack_id, game_id) VALUES (?, ?)'
+  ).run(packId, gameId);
+}
+
 export function listUserFavorites(viewerId: string): PackRow[] {
   const db = getDb();
   const packs = db.prepare(`
     SELECT ep.*,
-      COUNT(ec.id) as card_count,
-      COALESCE(SUM(CASE WHEN ec.deck_type = 'die'  THEN 1 ELSE 0 END), 0) as die_count,
-      COALESCE(SUM(CASE WHEN ec.deck_type = 'live' THEN 1 ELSE 0 END), 0) as live_count,
-      COALESCE(SUM(CASE WHEN ec.deck_type = 'bye'  THEN 1 ELSE 0 END), 0) as bye_count,
-      fc.text as featured_card_text,
-      fc.deck_type as featured_card_deck,
+      u.display_name as creator_name,
+      (SELECT COUNT(*) FROM expansion_cards ec WHERE ec.pack_id = ep.id) as card_count,
+      (SELECT COUNT(*) FROM expansion_cards ec WHERE ec.pack_id = ep.id AND ec.deck_type = 'die')  as die_count,
+      (SELECT COUNT(*) FROM expansion_cards ec WHERE ec.pack_id = ep.id AND ec.deck_type = 'live') as live_count,
+      (SELECT COUNT(*) FROM expansion_cards ec WHERE ec.pack_id = ep.id AND ec.deck_type = 'bye')  as bye_count,
+      (SELECT COUNT(*) FROM pack_usage pu WHERE pu.pack_id = ep.id) as usage_count,
+      (SELECT COUNT(*) FROM pack_favorites pf2 WHERE pf2.pack_id = ep.id) as favorite_count,
+      (SELECT text      FROM expansion_cards WHERE id = ep.featured_card_id) as featured_card_text,
+      (SELECT deck_type FROM expansion_cards WHERE id = ep.featured_card_id) as featured_card_deck,
       1 as is_favorited
     FROM expansion_packs ep
     INNER JOIN pack_favorites pf ON pf.pack_id = ep.id AND pf.user_id = ?
-    LEFT JOIN expansion_cards ec ON ec.pack_id = ep.id
-    LEFT JOIN expansion_cards fc ON fc.id = ep.featured_card_id
-    GROUP BY ep.id
+    LEFT JOIN users u ON u.id = ep.creator_id
     ORDER BY pf.created_at DESC
   `).all(viewerId) as PackRow[];
   return packs.map(normalizePackRow);
