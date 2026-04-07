@@ -1,5 +1,6 @@
 import { Card } from "../schema/Card.js";
 import { CardData } from "../data/cards.js";
+import type { ExpansionCard } from "../db/types.js";
 
 export function shuffle<T>(array: T[]): T[] {
   const shuffled = [...array];
@@ -21,4 +22,42 @@ export function createDeck(cards: CardData[], deckType: string): Card[] {
     if (data.special) card.special = data.special;
     return card;
   });
+}
+
+/**
+ * Convert expansion_cards DB rows to CardData buckets keyed by the game's
+ * deck type names. Note DB uses 'live' while the game engine uses 'living'.
+ */
+export function expansionCardsToCardData(cards: ExpansionCard[]): {
+  die: CardData[];
+  living: CardData[];
+  bye: CardData[];
+} {
+  const result: { die: CardData[]; living: CardData[]; bye: CardData[] } = {
+    die: [],
+    living: [],
+    bye: [],
+  };
+  for (const c of cards) {
+    const bucket: "die" | "living" | "bye" =
+      c.deck_type === "live" ? "living" : (c.deck_type as "die" | "bye");
+    result[bucket].push({ id: c.id, text: c.text });
+  }
+  return result;
+}
+
+/**
+ * Merge base-game card arrays with expansion card arrays.
+ */
+export function mergeDecks(
+  baseDie: CardData[],
+  baseLiving: CardData[],
+  baseBye: CardData[],
+  ext: { die: CardData[]; living: CardData[]; bye: CardData[] }
+): { die: CardData[]; living: CardData[]; bye: CardData[] } {
+  return {
+    die: [...baseDie, ...ext.die],
+    living: [...baseLiving, ...ext.living],
+    bye: [...baseBye, ...ext.bye],
+  };
 }
