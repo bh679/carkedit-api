@@ -161,6 +161,7 @@ export interface ExpansionPack {
   is_official: boolean;
   is_favorited?: boolean;
   version: number;
+  featured_card_id: string | null;
   created_at: string;
   updated_at: string;
 }

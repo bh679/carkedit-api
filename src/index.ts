@@ -458,7 +458,7 @@ const server = defineServer({
         if (!pack) return res.status(404).json({ error: "Pack not found" });
         res.json(pack);
       } catch (err: any) {
-        if (err.message?.includes('no cards')) {
+        if (err.message?.includes('no cards') || err.message?.includes('featured_card_id')) {
           return res.status(400).json({ error: err.message });
         }
         console.error("[CarkedIt API] Update pack error:", err);

@@ -154,6 +154,7 @@ export function updatePack(id: string, updates: {
   description?: string;
   visibility?: string;
   status?: string;
+  featured_card_id?: string | null;
 }): ExpansionPack | null {
   const db = getDb();
 
@@ -170,6 +171,16 @@ export function updatePack(id: string, updates: {
     }
   }
 
+  // Validate featured_card_id belongs to this pack
+  if (updates.featured_card_id !== undefined && updates.featured_card_id !== null) {
+    const owned = db.prepare(
+      'SELECT 1 FROM expansion_cards WHERE id = ? AND pack_id = ?'
+    ).get(updates.featured_card_id, id);
+    if (!owned) {
+      throw new Error('featured_card_id must reference a card belonging to this pack');
+    }
+  }
+
   const sets: string[] = [];
   const params: any[] = [];
 
@@ -177,6 +188,7 @@ export function updatePack(id: string, updates: {
   if (updates.description !== undefined) { sets.push('description = ?'); params.push(updates.description); }
   if (updates.visibility !== undefined) { sets.push('visibility = ?'); params.push(updates.visibility); }
   if (updates.status !== undefined) { sets.push('status = ?'); params.push(updates.status); }
+  if (updates.featured_card_id !== undefined) { sets.push('featured_card_id = ?'); params.push(updates.featured_card_id); }
 
   if (sets.length === 0) return normalizePackRow(pack as any);
 
@@ -261,6 +273,11 @@ export function updateCard(packId: string, cardId: string, updates: {
 
 export function deleteCard(packId: string, cardId: string): boolean {
   const db = getDb();
+  // If this card is the pack's featured card, clear it (defense in depth — the
+  // ALTER-added column has no FK, so we enforce this in code).
+  db.prepare(
+    "UPDATE expansion_packs SET featured_card_id = NULL, updated_at = datetime('now') WHERE id = ? AND featured_card_id = ?"
+  ).run(packId, cardId);
   const result = db.prepare('DELETE FROM expansion_cards WHERE id = ? AND pack_id = ?').run(cardId, packId);
   return result.changes > 0;
 }
