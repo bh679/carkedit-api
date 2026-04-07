@@ -6,3 +6,4 @@ data/*.db
 data/*.db-wal
 data/*.db-shm
 firebase-service-account.json
+carkedit-*-firebase-adminsdk-*.json

@@ -53,8 +53,9 @@ type PackRow = ExpansionPack & {
   creator_name?: string | null;
 };
 
-function normalizePackRow<T extends { is_official: any; is_favorited?: any }>(row: T): T {
+function normalizePackRow<T extends { is_official: any; is_dev?: any; is_favorited?: any }>(row: T): T {
   row.is_official = !!row.is_official;
+  if (row.is_dev !== undefined) row.is_dev = !!row.is_dev;
   if (row.is_favorited !== undefined) row.is_favorited = !!row.is_favorited;
   return row;
 }
@@ -63,6 +64,7 @@ export function listPacks(filters: {
   creator_id?: string;
   status?: string;
   is_official?: boolean;
+  is_dev?: boolean;
   search?: string;
   sort?: 'newest' | 'most_used' | 'most_saved';
   viewer_id?: string;
@@ -78,6 +80,7 @@ export function listPacks(filters: {
   if (filters.creator_id) { conditions.push('ep.creator_id = ?'); params.push(filters.creator_id); }
   if (filters.status) { conditions.push('ep.status = ?'); params.push(filters.status); }
   if (filters.is_official !== undefined) { conditions.push('ep.is_official = ?'); params.push(filters.is_official ? 1 : 0); }
+  if (filters.is_dev !== undefined) { conditions.push('ep.is_dev = ?'); params.push(filters.is_dev ? 1 : 0); }
   if (filters.search && filters.search.trim()) {
     const term = `%${filters.search.trim()}%`;
     conditions.push('(ep.title LIKE ? OR ep.description LIKE ? OR u.display_name LIKE ?)');
@@ -196,6 +199,16 @@ export function setPackOfficial(packId: string, isOfficial: boolean): ExpansionP
   const result = db.prepare(
     "UPDATE expansion_packs SET is_official = ?, updated_at = datetime('now') WHERE id = ?"
   ).run(isOfficial ? 1 : 0, packId);
+  if (result.changes === 0) return null;
+  const row = db.prepare('SELECT * FROM expansion_packs WHERE id = ?').get(packId) as ExpansionPack;
+  return normalizePackRow(row as any);
+}
+
+export function setPackDev(packId: string, isDev: boolean): ExpansionPack | null {
+  const db = getDb();
+  const result = db.prepare(
+    "UPDATE expansion_packs SET is_dev = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(isDev ? 1 : 0, packId);
   if (result.changes === 0) return null;
   const row = db.prepare('SELECT * FROM expansion_packs WHERE id = ?').get(packId) as ExpansionPack;
   return normalizePackRow(row as any);
