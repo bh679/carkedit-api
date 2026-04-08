@@ -334,7 +334,7 @@ export function deletePack(id: string): boolean {
 
 // --- Cards ---
 
-export function addCards(packId: string, cards: { deck_type: string; text: string }[]): ExpansionCard[] {
+export function addCards(packId: string, cards: { deck_type: string; text: string; prompt?: string | null; card_special?: string | null; options_json?: string | null }[]): ExpansionCard[] {
   const db = getDb();
 
   // Verify pack exists
@@ -347,8 +347,8 @@ export function addCards(packId: string, cards: { deck_type: string; text: strin
   ).get(packId) as { max_sort: number }).max_sort;
 
   const insert = db.prepare(`
-    INSERT INTO expansion_cards (id, pack_id, deck_type, text, sort_order)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO expansion_cards (id, pack_id, deck_type, text, prompt, card_special, options_json, sort_order)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const createdIds: string[] = [];
@@ -356,7 +356,13 @@ export function addCards(packId: string, cards: { deck_type: string; text: strin
   const transaction = db.transaction(() => {
     for (let i = 0; i < cards.length; i++) {
       const id = `card_${randomUUID()}`;
-      insert.run(id, packId, cards[i].deck_type, cards[i].text, maxSort + 1 + i);
+      insert.run(
+        id, packId, cards[i].deck_type, cards[i].text,
+        cards[i].prompt ?? null,
+        cards[i].card_special ?? null,
+        cards[i].options_json ?? null,
+        maxSort + 1 + i,
+      );
       createdIds.push(id);
     }
   });
@@ -373,6 +379,9 @@ export function updateCard(packId: string, cardId: string, updates: {
   text?: string;
   deck_type?: string;
   sort_order?: number;
+  prompt?: string | null;
+  card_special?: string | null;
+  options_json?: string | null;
 }): ExpansionCard | null {
   const db = getDb();
 
@@ -387,6 +396,9 @@ export function updateCard(packId: string, cardId: string, updates: {
   if (updates.text !== undefined) { sets.push('text = ?'); params.push(updates.text); }
   if (updates.deck_type !== undefined) { sets.push('deck_type = ?'); params.push(updates.deck_type); }
   if (updates.sort_order !== undefined) { sets.push('sort_order = ?'); params.push(updates.sort_order); }
+  if (updates.prompt !== undefined) { sets.push('prompt = ?'); params.push(updates.prompt); }
+  if (updates.card_special !== undefined) { sets.push('card_special = ?'); params.push(updates.card_special); }
+  if (updates.options_json !== undefined) { sets.push('options_json = ?'); params.push(updates.options_json); }
 
   if (sets.length === 0) return card;
 

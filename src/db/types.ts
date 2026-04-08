@@ -172,6 +172,9 @@ export interface ExpansionCard {
   pack_id: string;
   deck_type: 'die' | 'live' | 'bye';
   text: string;
+  prompt: string | null;
+  card_special: string | null;
+  options_json: string | null;
   sort_order: number;
   created_at: string;
   updated_at: string;

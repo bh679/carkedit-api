@@ -1,4 +1,4 @@
-import { Schema, type } from "@colyseus/schema";
+import { ArraySchema, Schema, type } from "@colyseus/schema";
 
 export class Card extends Schema {
   @type("string") id: string = "";
@@ -6,6 +6,8 @@ export class Card extends Schema {
   @type("string") deck: string = "";        // "die", "living", or "bye" (replaces cardType)
   @type("boolean") faceUp: boolean = false;
   @type("string") submittedBy: string = ""; // Session ID of submitter (empty if not submitted)
-  @type("string") special: string = "";     // "Wildcard" for eulogy wildcard cards
+  @type("string") special: string = "";     // "Wildcard" / "?" / "Split"
   @type("string") packId: string = "";      // Source expansion pack id, empty for base cards
+  @type("string") prompt: string = "";      // Optional follow-up prompt rendered under the card text
+  @type(["string"]) options = new ArraySchema<string>(); // Two choices for "Split" die cards
 }

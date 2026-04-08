@@ -1,5 +1,5 @@
 // Card data — IDs match the client JSON files for illustration lookup
-export interface CardData { id: number | string; text: string; special?: string; packId?: string; }
+export interface CardData { id: number | string; text: string; special?: string; packId?: string; prompt?: string | null; options?: string[]; }
 
 export const DIE_CARDS: CardData[] = [
   { id: 1,  text: "Died by Eating Five-Week Old Leftovers" },
@@ -31,25 +31,25 @@ export const DIE_CARDS: CardData[] = [
   { id: 27, text: "Died by Being Stepped On" },
   { id: 28, text: "Died Peacefully in a Field of Sunflowers" },
   { id: 29, text: "Died Being Ripped Apart by Dalmatians" },
-  { id: 30, text: "Pick the Best Way to Die" },
-  { id: 31, text: "Pick the Worst Way to Die" },
-  { id: 32, text: "Pick the Funniest Way to Die" },
-  { id: 33, text: "Pick a Common Way to Die" },
-  { id: 34, text: "Pick a Bizarre Way to Die" },
-  { id: 35, text: "Pick a Gross Way to Die" },
-  { id: 36, text: "Pick a Stupid Way to Die" },
-  { id: 37, text: "Trampled to Death by Camels or Eaten by a Killer Whale" },
-  { id: 38, text: "Tickled to Death or Bitten by Sexy Vampires" },
-  { id: 39, text: "A Heart Attack Doing Something You Love or Peacefully in Your Sleep" },
-  { id: 40, text: "Nuked in the Robot Uprising or Survive the Nuke but Die from Radiation" },
-  { id: 41, text: "Laughing Too Much During the Best Meal Ever or On the Toilet After" },
-  { id: 42, text: "Because of Sex or During Sex" },
-  { id: 43, text: "A Quick Death or A Slow Death" },
-  { id: 44, text: "Hit on the Head by a Falling Coconut or Skydiving with a Faulty Parachute" },
-  { id: 45, text: "Washed Away in a Tsunami or Turned to Stone by a Volcanic Blast" },
-  { id: 46, text: "With Time to Prepare or Suddenly Without Warning" },
-  { id: 47, text: "Listening to Your Favourite Music or Watching Your Favourite Movie" },
-  { id: 48, text: "Old with Many Regrets or Young with No Regrets" },
+  { id: 30, text: "Pick the Best Way to Die", special: "?" },
+  { id: 31, text: "Pick the Worst Way to Die", special: "?" },
+  { id: 32, text: "Pick the Funniest Way to Die", special: "?" },
+  { id: 33, text: "Pick a Common Way to Die", special: "?" },
+  { id: 34, text: "Pick a Bizarre Way to Die", special: "?" },
+  { id: 35, text: "Pick a Gross Way to Die", special: "?" },
+  { id: 36, text: "Pick a Stupid Way to Die", special: "?" },
+  { id: 37, text: "Trampled to Death by Camels or Eaten by a Killer Whale", special: "Split", options: ["Trampled to Death by Camels", "Eaten by a Killer Whale"] },
+  { id: 38, text: "Tickled to Death or Bitten by Sexy Vampires", special: "Split", options: ["Tickled to Death", "Bitten by Sexy Vampires"] },
+  { id: 39, text: "A Heart Attack Doing Something You Love or Peacefully in Your Sleep", special: "Split", options: ["A Heart Attack Doing Something You Love", "Peacefully in Your Sleep"] },
+  { id: 40, text: "Nuked in the Robot Uprising or Survive the Nuke but Die from Radiation", special: "Split", options: ["Nuked in the Robot Uprising", "Survive the Nuke but Die from Radiation"] },
+  { id: 41, text: "Laughing Too Much During the Best Meal Ever or On the Toilet After", special: "Split", options: ["Laughing Too Much During the Best Meal Ever", "On the Toilet After"] },
+  { id: 42, text: "Because of Sex or During Sex", special: "Split", options: ["Because of Sex", "During Sex"] },
+  { id: 43, text: "A Quick Death or A Slow Death", special: "Split", options: ["A Quick Death", "A Slow Death"] },
+  { id: 44, text: "Hit on the Head by a Falling Coconut or Skydiving with a Faulty Parachute", special: "Split", options: ["Hit on the Head by a Falling Coconut", "Skydiving with a Faulty Parachute"] },
+  { id: 45, text: "Washed Away in a Tsunami or Turned to Stone by a Volcanic Blast", special: "Split", options: ["Washed Away in a Tsunami", "Turned to Stone by a Volcanic Blast"] },
+  { id: 46, text: "With Time to Prepare or Suddenly Without Warning", special: "Split", options: ["With Time to Prepare", "Suddenly Without Warning"] },
+  { id: 47, text: "Listening to Your Favourite Music or Watching Your Favourite Movie", special: "Split", options: ["Listening to Your Favourite Music", "Watching Your Favourite Movie"] },
+  { id: 48, text: "Old with Many Regrets or Young with No Regrets", special: "Split", options: ["Old with Many Regrets", "Young with No Regrets"] },
 ];
 
 export const LIVING_CARDS: CardData[] = [

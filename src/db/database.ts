@@ -171,6 +171,9 @@ export function initDatabase(): void {
       pack_id TEXT NOT NULL REFERENCES expansion_packs(id) ON DELETE CASCADE,
       deck_type TEXT NOT NULL CHECK(deck_type IN ('die', 'live', 'bye')),
       text TEXT NOT NULL,
+      prompt TEXT,
+      card_special TEXT,
+      options_json TEXT,
       sort_order INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -241,6 +244,18 @@ export function initDatabase(): void {
     db.exec('ALTER TABLE expansion_packs ADD COLUMN is_dev INTEGER NOT NULL DEFAULT 0');
     db.exec('CREATE INDEX IF NOT EXISTS idx_packs_dev ON expansion_packs(is_dev)');
   }
+  // Migrate: add prompt column to expansion_cards (for existing DBs)
+  const cardCols = db.prepare("PRAGMA table_info(expansion_cards)").all().map((c: any) => c.name);
+  if (!cardCols.includes('prompt')) {
+    db.exec('ALTER TABLE expansion_cards ADD COLUMN prompt TEXT');
+  }
+  if (!cardCols.includes('card_special')) {
+    db.exec('ALTER TABLE expansion_cards ADD COLUMN card_special TEXT');
+  }
+  if (!cardCols.includes('options_json')) {
+    db.exec('ALTER TABLE expansion_cards ADD COLUMN options_json TEXT');
+  }
+
   if (!packCols.includes('featured_card_id')) {
     // No FK on ALTER (SQLite limitation); deletion cleanup is enforced in deleteCard().
     db.exec('ALTER TABLE expansion_packs ADD COLUMN featured_card_id TEXT');
