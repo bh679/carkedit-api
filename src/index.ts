@@ -656,6 +656,52 @@ const server = defineServer({
 
     // --- Expansion Card endpoints ---
 
+    /**
+     * Validate a custom-die-card variant. Returns an error message string or
+     * null when the input is valid.
+     * - card_special is optional, but when present must be "?" or "Split"
+     * - Variants only allowed on die deck
+     * - Split MUST include `options` as an array of exactly 2 non-empty strings
+     */
+    function validateCardVariant(deckType: string, cardSpecial: any, options: any): string | null {
+      if (cardSpecial === undefined || cardSpecial === null || cardSpecial === '') {
+        if (options !== undefined && options !== null) {
+          return "options can only be set on die-deck Split cards";
+        }
+        return null;
+      }
+      if (cardSpecial !== '?' && cardSpecial !== 'Split') {
+        return `card_special must be "?" or "Split", got: ${cardSpecial}`;
+      }
+      if (deckType !== 'die') {
+        return "card_special is only allowed on die-deck cards";
+      }
+      if (cardSpecial === 'Split') {
+        if (!Array.isArray(options) || options.length !== 2) {
+          return "Split cards require an options array of exactly 2 strings";
+        }
+        for (const o of options) {
+          if (typeof o !== 'string' || o.trim().length === 0) {
+            return "Split options must be non-empty strings";
+          }
+          if (o.length > 100) {
+            return "Split options max length is 100 characters";
+          }
+        }
+      } else {
+        if (options !== undefined && options !== null) {
+          return "Mystery (?) cards must not have an options array";
+        }
+      }
+      return null;
+    }
+
+    function normalizeCardSpecial(value: any): string | null {
+      if (value === '?' || value === 'Split') return value;
+      return null;
+    }
+
+
     app.post("/api/carkedit/packs/:id/cards", (req: any, res: any) => {
       try {
         const { cards } = req.body;
@@ -670,8 +716,21 @@ const server = defineServer({
           if (!card.text || typeof card.text !== 'string' || card.text.trim().length === 0) {
             return res.status(400).json({ error: "Each card must have non-empty text" });
           }
+          if (card.prompt !== undefined && card.prompt !== null && typeof card.prompt !== 'string') {
+            return res.status(400).json({ error: "card.prompt must be a string or null" });
+          }
+          const variantErr = validateCardVariant(card.deck_type, card.card_special, card.options);
+          if (variantErr) return res.status(400).json({ error: variantErr });
         }
-        const created = addCards(req.params.id, cards.map((c: any) => ({ deck_type: c.deck_type, text: c.text.trim() })));
+        const created = addCards(req.params.id, cards.map((c: any) => ({
+          deck_type: c.deck_type,
+          text: c.text.trim(),
+          prompt: typeof c.prompt === 'string' ? (c.prompt.trim() || null) : null,
+          card_special: normalizeCardSpecial(c.card_special),
+          options_json: c.card_special === 'Split' && Array.isArray(c.options)
+            ? JSON.stringify(c.options.map((o: string) => o.trim()))
+            : null,
+        })));
         res.status(201).json({ cards: created });
       } catch (err: any) {
         if (err.message === 'Pack not found') {
@@ -684,7 +743,34 @@ const server = defineServer({
 
     app.put("/api/carkedit/packs/:id/cards/:cardId", (req: any, res: any) => {
       try {
-        const card = updateCard(req.params.id, req.params.cardId, req.body);
+        const body = req.body || {};
+        if (body.prompt !== undefined && body.prompt !== null && typeof body.prompt !== 'string') {
+          return res.status(400).json({ error: "prompt must be a string or null" });
+        }
+        // Variant validation: only check if any of the variant fields are being touched.
+        if (body.card_special !== undefined || body.options !== undefined) {
+          // We need the effective deck_type for validation. Use the one from the body
+          // if provided, otherwise treat as 'die' (the only deck that allows variants).
+          const effectiveDeck = body.deck_type ?? 'die';
+          const variantErr = validateCardVariant(effectiveDeck, body.card_special, body.options);
+          if (variantErr) return res.status(400).json({ error: variantErr });
+        }
+        const updates: any = {};
+        if (body.text !== undefined) updates.text = body.text;
+        if (body.deck_type !== undefined) updates.deck_type = body.deck_type;
+        if (body.sort_order !== undefined) updates.sort_order = body.sort_order;
+        if (body.prompt !== undefined) {
+          updates.prompt = typeof body.prompt === 'string' ? (body.prompt.trim() || null) : null;
+        }
+        if (body.card_special !== undefined) {
+          updates.card_special = normalizeCardSpecial(body.card_special);
+        }
+        if (body.options !== undefined) {
+          updates.options_json = body.card_special === 'Split' && Array.isArray(body.options)
+            ? JSON.stringify(body.options.map((o: string) => String(o).trim()))
+            : null;
+        }
+        const card = updateCard(req.params.id, req.params.cardId, updates);
         if (!card) return res.status(404).json({ error: "Card not found" });
         res.json(card);
       } catch (err) {
