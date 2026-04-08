@@ -57,7 +57,8 @@ const server = defineServer({
     fs.mkdirSync(brandsDir, { recursive: true });
     app.use('/uploads', express.static(uploadsDir));
 
-    const ALLOWED_BRAND_MIME = new Set(['image/png', 'image/jpeg', 'image/webp']);
+    // PNG / WebP / SVG — all support transparency. JPEG excluded.
+    const ALLOWED_BRAND_MIME = new Set(['image/png', 'image/webp', 'image/svg+xml']);
     const brandUpload = multer({
       storage: multer.diskStorage({
         destination: brandsDir,
