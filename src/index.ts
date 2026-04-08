@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 import express from "express";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
-import { initDatabase, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports } from "./db/database.js";
+import { initDatabase, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag } from "./db/users.js";
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, getPackStats } from "./db/packs.js";
 import { optionalAuth, requireAuth, requireAdmin, setFirebaseAvailable } from "./middleware/auth.js";
@@ -246,6 +246,61 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Get issue reports error:", err);
         res.status(500).json({ error: "Failed to retrieve issue reports" });
+      }
+    });
+
+    // --- Survey endpoints ---
+
+    app.post("/api/carkedit/surveys", (req: any, res: any) => {
+      try {
+        const { game_id, player_name, session_id, nps_score, comment, improvement, client_version, is_dev } = req.body;
+
+        if (typeof nps_score !== 'number' || !Number.isInteger(nps_score) || nps_score < 0 || nps_score > 10) {
+          return res.status(400).json({ error: "nps_score must be an integer between 0 and 10" });
+        }
+
+        const saved = saveSurveyResponse({
+          id: randomUUID(),
+          created_at: new Date().toISOString(),
+          game_id: game_id || undefined,
+          player_name: player_name || undefined,
+          session_id: session_id || undefined,
+          nps_score,
+          comment: comment || undefined,
+          improvement: improvement || undefined,
+          client_version: client_version || undefined,
+          is_dev: !!is_dev,
+        });
+
+        if (!saved) {
+          return res.status(409).json({ error: "Survey already submitted for this game" });
+        }
+        res.json({ status: "saved" });
+      } catch (err) {
+        console.error("[CarkedIt API] Save survey error:", err);
+        res.status(500).json({ error: "Failed to save survey response" });
+      }
+    });
+
+    app.get("/api/carkedit/surveys/stats", requireAdmin(), (req: any, res: any) => {
+      try {
+        const devFilter = (req.query.dev as string) === 'dev' || (req.query.dev as string) === 'nodev' ? req.query.dev : 'all';
+        res.json(getSurveyStats(devFilter as any));
+      } catch (err) {
+        console.error("[CarkedIt API] Get survey stats error:", err);
+        res.status(500).json({ error: "Failed to retrieve survey stats" });
+      }
+    });
+
+    app.get("/api/carkedit/surveys", requireAdmin(), (req: any, res: any) => {
+      try {
+        const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+        const offset = parseInt(req.query.offset as string) || 0;
+        const devFilter = (req.query.dev as string) === 'dev' || (req.query.dev as string) === 'nodev' ? req.query.dev : 'all';
+        res.json(getSurveyResponses(limit, offset, devFilter as any));
+      } catch (err) {
+        console.error("[CarkedIt API] Get surveys error:", err);
+        res.status(500).json({ error: "Failed to retrieve survey responses" });
       }
     });
 

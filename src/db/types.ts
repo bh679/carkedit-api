@@ -179,3 +179,27 @@ export interface ExpansionCard {
 export interface PackWithCards extends ExpansionPack {
   cards: ExpansionCard[];
 }
+
+export interface SurveyResponse {
+  id: string;
+  created_at: string;
+  game_id?: string;
+  player_name?: string;
+  session_id?: string;
+  nps_score: number;
+  comment?: string;
+  improvement?: string;
+  client_version?: string;
+  is_dev?: boolean;
+}
+
+export interface SurveyStats {
+  count: number;
+  avgNps: number;
+  minNps: number | null;
+  maxNps: number | null;
+  nps: number | null;
+  promoters: number;
+  passives: number;
+  detractors: number;
+}
