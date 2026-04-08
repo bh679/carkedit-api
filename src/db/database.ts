@@ -140,6 +140,7 @@ export function initDatabase(): void {
       is_dev INTEGER NOT NULL DEFAULT 0,
       version INTEGER NOT NULL DEFAULT 1,
       featured_card_id TEXT REFERENCES expansion_cards(id) ON DELETE SET NULL,
+      brand_image_url TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -243,6 +244,9 @@ export function initDatabase(): void {
   if (!packCols.includes('featured_card_id')) {
     // No FK on ALTER (SQLite limitation); deletion cleanup is enforced in deleteCard().
     db.exec('ALTER TABLE expansion_packs ADD COLUMN featured_card_id TEXT');
+  }
+  if (!packCols.includes('brand_image_url')) {
+    db.exec('ALTER TABLE expansion_packs ADD COLUMN brand_image_url TEXT');
   }
 
   // Migrate: drop legacy `visibility` column from expansion_packs.

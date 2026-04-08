@@ -7,4 +7,5 @@ export class Card extends Schema {
   @type("boolean") faceUp: boolean = false;
   @type("string") submittedBy: string = ""; // Session ID of submitter (empty if not submitted)
   @type("string") special: string = "";     // "Wildcard" for eulogy wildcard cards
+  @type("string") packId: string = "";      // Source expansion pack id, empty for base cards
 }

@@ -20,6 +20,7 @@ export function createDeck(cards: CardData[], deckType: string): Card[] {
     card.faceUp = false;
     card.submittedBy = "";
     if (data.special) card.special = data.special;
+    if (data.packId) card.packId = data.packId;
     return card;
   });
 }
@@ -41,7 +42,7 @@ export function expansionCardsToCardData(cards: ExpansionCard[]): {
   for (const c of cards) {
     const bucket: "die" | "living" | "bye" =
       c.deck_type === "live" ? "living" : (c.deck_type as "die" | "bye");
-    result[bucket].push({ id: c.id, text: c.text });
+    result[bucket].push({ id: c.id, text: c.text, packId: c.pack_id });
   }
   return result;
 }

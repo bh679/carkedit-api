@@ -280,6 +280,7 @@ export function updatePack(id: string, updates: {
   description?: string;
   status?: string;
   featured_card_id?: string | null;
+  brand_image_url?: string | null;
 }): ExpansionPack | null {
   const db = getDb();
 
@@ -313,6 +314,7 @@ export function updatePack(id: string, updates: {
   if (updates.description !== undefined) { sets.push('description = ?'); params.push(updates.description); }
   if (updates.status !== undefined) { sets.push('status = ?'); params.push(updates.status); }
   if (updates.featured_card_id !== undefined) { sets.push('featured_card_id = ?'); params.push(updates.featured_card_id); }
+  if (updates.brand_image_url !== undefined) { sets.push('brand_image_url = ?'); params.push(updates.brand_image_url); }
 
   if (sets.length === 0) return normalizePackRow(pack as any);
 
