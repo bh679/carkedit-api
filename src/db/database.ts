@@ -547,6 +547,22 @@ export function getGameById(id: string): GameDetail | null {
   return game;
 }
 
+export function setGameDev(gameId: string, isDev: boolean): GameDetail | null {
+  const result = db.prepare('UPDATE games SET is_dev = ? WHERE id = ?').run(isDev ? 1 : 0, gameId);
+  if (result.changes === 0) return null;
+  return getGameById(gameId);
+}
+
+export function setSurveyDev(surveyId: string, isDev: boolean): SurveyResponse | null {
+  const result = db.prepare('UPDATE survey_responses SET is_dev = ? WHERE id = ?').run(isDev ? 1 : 0, surveyId);
+  if (result.changes === 0) return null;
+  const row = db.prepare(`
+    SELECT id, created_at, game_id, player_name, session_id, nps_score, comment, improvement, client_version, is_dev
+    FROM survey_responses WHERE id = ?
+  `).get(surveyId) as SurveyResponse | undefined;
+  return row ?? null;
+}
+
 export function getStats(): { finishedGames: number; totalGames: number; unfinishedGames: number; abandonedGames: number; liveGames: number; totalPlayers: number; totalPlayTime: number; avgPlayTime: number; medianPlayTime: number; longestPlayTime: number } {
   const finishedGames = (db.prepare("SELECT COUNT(*) as c FROM games WHERE status = 'finished'").get() as any).c;
   const totalGames = (db.prepare("SELECT COUNT(*) as c FROM games").get() as any).c;
