@@ -162,6 +162,7 @@ export interface ExpansionPack {
   is_favorited?: boolean;
   version: number;
   featured_card_id: string | null;
+  brand_image_url: string | null;
   created_at: string;
   updated_at: string;
 }

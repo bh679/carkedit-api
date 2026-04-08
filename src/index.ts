@@ -3,6 +3,7 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import express from "express";
+import multer from "multer";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
 import { initDatabase, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports } from "./db/database.js";
@@ -49,6 +50,30 @@ const server = defineServer({
     });
 
     app.use(express.static(clientDir, { extensions: ['html'] }));
+
+    // Serve uploaded brand images
+    const uploadsDir = path.join(__dirname, '../uploads');
+    const brandsDir = path.join(uploadsDir, 'brands');
+    fs.mkdirSync(brandsDir, { recursive: true });
+    app.use('/uploads', express.static(uploadsDir));
+
+    const ALLOWED_BRAND_MIME = new Set(['image/png', 'image/jpeg', 'image/webp']);
+    const brandUpload = multer({
+      storage: multer.diskStorage({
+        destination: brandsDir,
+        filename: (req, file, cb) => {
+          const ext = path.extname(file.originalname || '').toLowerCase() || '.png';
+          cb(null, `pack-${req.params.id}-${Date.now()}${ext}`);
+        },
+      }),
+      limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
+      fileFilter: (_req, file, cb) => {
+        if (!ALLOWED_BRAND_MIME.has(file.mimetype)) {
+          return cb(new Error('Only PNG, JPEG, or WebP images are allowed'));
+        }
+        cb(null, true);
+      },
+    });
 
     // Apply optional auth to pack and user routes
     app.use('/api/carkedit/packs', optionalAuth());
@@ -490,6 +515,10 @@ const server = defineServer({
 
     app.put("/api/carkedit/packs/:id", (req: any, res: any) => {
       try {
+        // brand_image_url can only be cleared via PUT; uploads go through POST /brand.
+        if (req.body && 'brand_image_url' in req.body && req.body.brand_image_url !== null) {
+          return res.status(400).json({ error: "brand_image_url can only be set via POST /packs/:id/brand" });
+        }
         const pack = updatePack(req.params.id, req.body);
         if (!pack) return res.status(404).json({ error: "Pack not found" });
         res.json(pack);
@@ -499,6 +528,51 @@ const server = defineServer({
         }
         console.error("[CarkedIt API] Update pack error:", err);
         res.status(500).json({ error: "Failed to update pack" });
+      }
+    });
+
+    app.post("/api/carkedit/packs/:id/brand", brandUpload.single('image'), (req: any, res: any) => {
+      try {
+        if (!req.file) {
+          return res.status(400).json({ error: "image file is required" });
+        }
+        const existing = getPackById(req.params.id);
+        if (!existing) {
+          fs.unlink(req.file.path, () => {});
+          return res.status(404).json({ error: "Pack not found" });
+        }
+        // Delete previous brand file if present and is a local upload
+        const prev = existing.brand_image_url;
+        if (prev && prev.startsWith('/uploads/brands/')) {
+          const prevPath = path.join(uploadsDir, prev.replace(/^\/uploads\//, ''));
+          fs.unlink(prevPath, () => {});
+        }
+        const relUrl = `/uploads/brands/${req.file.filename}`;
+        const pack = updatePack(req.params.id, { brand_image_url: relUrl });
+        res.json(pack);
+      } catch (err: any) {
+        console.error("[CarkedIt API] Upload brand image error:", err);
+        res.status(500).json({ error: "Failed to upload brand image" });
+      }
+    }, (err: any, _req: any, res: any, _next: any) => {
+      // Multer error handler (fires for size limits and fileFilter rejects)
+      res.status(400).json({ error: err?.message || "Invalid upload" });
+    });
+
+    app.delete("/api/carkedit/packs/:id/brand", (req: any, res: any) => {
+      try {
+        const existing = getPackById(req.params.id);
+        if (!existing) return res.status(404).json({ error: "Pack not found" });
+        const prev = existing.brand_image_url;
+        if (prev && prev.startsWith('/uploads/brands/')) {
+          const prevPath = path.join(uploadsDir, prev.replace(/^\/uploads\//, ''));
+          fs.unlink(prevPath, () => {});
+        }
+        const pack = updatePack(req.params.id, { brand_image_url: null });
+        res.json(pack);
+      } catch (err) {
+        console.error("[CarkedIt API] Delete brand image error:", err);
+        res.status(500).json({ error: "Failed to remove brand image" });
       }
     });
 
