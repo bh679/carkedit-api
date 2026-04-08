@@ -255,6 +255,9 @@ export function initDatabase(): void {
   if (!cardCols.includes('options_json')) {
     db.exec('ALTER TABLE expansion_cards ADD COLUMN options_json TEXT');
   }
+  if (!cardCols.includes('image_url')) {
+    db.exec('ALTER TABLE expansion_cards ADD COLUMN image_url TEXT');
+  }
 
   if (!packCols.includes('featured_card_id')) {
     // No FK on ALTER (SQLite limitation); deletion cleanup is enforced in deleteCard().
