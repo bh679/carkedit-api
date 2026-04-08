@@ -7,7 +7,7 @@ import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
 import { initDatabase, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag } from "./db/users.js";
-import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, getPackStats } from "./db/packs.js";
+import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, getPackStats, listPackStatsAll } from "./db/packs.js";
 import { optionalAuth, requireAuth, requireAdmin, setFirebaseAvailable } from "./middleware/auth.js";
 import type { GameResult, IssueReport } from "./db/types.js";
 
@@ -462,6 +462,17 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Set pack dev error:", err);
         res.status(500).json({ error: "Failed to set pack dev" });
+      }
+    });
+
+    // Must be registered BEFORE /packs/:id so the literal path wins.
+    app.get("/api/carkedit/packs/stats", requireAdmin(), (_req: any, res: any) => {
+      try {
+        const packs = listPackStatsAll();
+        res.json({ packs });
+      } catch (err) {
+        console.error("[CarkedIt API] Pack stats list error:", err);
+        res.status(500).json({ error: "Failed to retrieve pack stats list" });
       }
     });
 
