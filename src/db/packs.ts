@@ -151,6 +151,67 @@ export function getPackStats(packId: string): {
   `).get(packId, packId, packId, packId, packId, packId) as any;
 }
 
+export type PackStatsRow = {
+  id: string;
+  title: string;
+  creator_id: string;
+  creator_name: string | null;
+  is_official: boolean;
+  is_dev: boolean;
+  status: string;
+  card_count: number;
+  die_count: number;
+  live_count: number;
+  bye_count: number;
+  usage_count: number;
+  favorite_count: number;
+  total_plays: number;
+  total_wins: number;
+  win_rate: number;
+  created_at: string;
+};
+
+export function listPackStatsAll(): PackStatsRow[] {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT
+      ep.id,
+      ep.title,
+      ep.creator_id,
+      ep.status,
+      ep.is_official,
+      ep.is_dev,
+      ep.created_at,
+      u.display_name as creator_name,
+      (SELECT COUNT(*) FROM expansion_cards ec WHERE ec.pack_id = ep.id) as card_count,
+      (SELECT COUNT(*) FROM expansion_cards ec WHERE ec.pack_id = ep.id AND ec.deck_type = 'die')  as die_count,
+      (SELECT COUNT(*) FROM expansion_cards ec WHERE ec.pack_id = ep.id AND ec.deck_type = 'live') as live_count,
+      (SELECT COUNT(*) FROM expansion_cards ec WHERE ec.pack_id = ep.id AND ec.deck_type = 'bye')  as bye_count,
+      (SELECT COUNT(*) FROM pack_usage pu WHERE pu.pack_id = ep.id) as usage_count,
+      (SELECT COUNT(*) FROM pack_favorites pf WHERE pf.pack_id = ep.id) as favorite_count,
+      (
+        SELECT COUNT(*) FROM card_plays cp
+        INNER JOIN expansion_cards ec2 ON ec2.id = cp.card_id
+        WHERE ec2.pack_id = ep.id
+      ) as total_plays,
+      (
+        SELECT COUNT(*) FROM card_plays cp
+        INNER JOIN expansion_cards ec3 ON ec3.id = cp.card_id
+        WHERE ec3.pack_id = ep.id AND cp.is_winner = 1
+      ) as total_wins
+    FROM expansion_packs ep
+    LEFT JOIN users u ON u.id = ep.creator_id
+    ORDER BY usage_count DESC, ep.created_at DESC
+  `).all() as any[];
+
+  return rows.map((r) => ({
+    ...r,
+    is_official: !!r.is_official,
+    is_dev: !!r.is_dev,
+    win_rate: r.total_plays > 0 ? r.total_wins / r.total_plays : 0,
+  }));
+}
+
 export function recordPackUsage(packId: string, gameId: string): void {
   const db = getDb();
   db.prepare(
