@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import type { GameResult, GameSummary, GameDetail, GameDetailCardPlay, GamePlayerResult, CardPlay, CardDraw, CardStat, IssueReport, GameEvent, GameEventRow } from './types.js';
+import type { GameResult, GameSummary, GameDetail, GameDetailCardPlay, GamePlayerResult, CardPlay, CardDraw, CardStat, IssueReport, GameEvent, GameEventRow, SurveyResponse, SurveyStats } from './types.js';
 import { DIE_CARDS, LIVING_CARDS, BYE_CARDS } from '../data/cards.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -175,6 +175,23 @@ export function initDatabase(): void {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_cards_pack ON expansion_cards(pack_id);
+
+    CREATE TABLE IF NOT EXISTS survey_responses (
+      id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      game_id TEXT,
+      player_name TEXT,
+      session_id TEXT,
+      nps_score INTEGER NOT NULL CHECK(nps_score BETWEEN 0 AND 10),
+      comment TEXT,
+      improvement TEXT,
+      client_version TEXT,
+      is_dev INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_survey_created_at ON survey_responses(created_at);
+    CREATE INDEX IF NOT EXISTS idx_survey_game_id ON survey_responses(game_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_survey_game_session
+      ON survey_responses(game_id, session_id) WHERE session_id IS NOT NULL;
   `);
 
   // Migrate: add new columns if they don't exist (for existing DBs)
@@ -205,6 +222,12 @@ export function initDatabase(): void {
   }
   if (!userCols.includes('birth_day')) {
     db.exec('ALTER TABLE users ADD COLUMN birth_day INTEGER NOT NULL DEFAULT 0');
+  }
+
+  // Migrate: add is_dev column to survey_responses (for existing DBs)
+  const surveyCols = db.prepare("PRAGMA table_info(survey_responses)").all().map((c: any) => c.name);
+  if (surveyCols.length > 0 && !surveyCols.includes('is_dev')) {
+    db.exec('ALTER TABLE survey_responses ADD COLUMN is_dev INTEGER NOT NULL DEFAULT 0');
   }
 
   // Migrate: add is_official column to expansion_packs (for existing DBs)
@@ -714,4 +737,70 @@ export function getGameEventsByRoom(roomId: string): GameEventRow[] {
     SELECT id, game_id, room_id, event_type, actor_session_id, actor_name, phase, round, data_json, created_at
     FROM game_events WHERE room_id = ? ORDER BY created_at ASC, id ASC
   `).all(roomId) as GameEventRow[];
+}
+
+// ── Surveys ──────────────────────────────────────────
+
+export function saveSurveyResponse(r: SurveyResponse): boolean {
+  const info = db.prepare(`
+    INSERT OR IGNORE INTO survey_responses
+      (id, created_at, game_id, player_name, session_id, nps_score, comment, improvement, client_version, is_dev)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    r.id, r.created_at, r.game_id ?? null, r.player_name ?? null,
+    r.session_id ?? null, r.nps_score, r.comment ?? null,
+    r.improvement ?? null, r.client_version ?? null, r.is_dev ? 1 : 0
+  );
+  return info.changes > 0;
+}
+
+export type SurveyDevFilter = 'all' | 'dev' | 'nodev';
+
+function devWhere(filter: SurveyDevFilter): string {
+  if (filter === 'dev') return 'WHERE is_dev = 1';
+  if (filter === 'nodev') return 'WHERE is_dev = 0';
+  return '';
+}
+
+export function getSurveyStats(devFilter: SurveyDevFilter = 'all'): SurveyStats {
+  const where = devWhere(devFilter);
+  const row = db.prepare(`
+    SELECT
+      COUNT(*) as count,
+      COALESCE(AVG(nps_score), 0) as avgNps,
+      MIN(nps_score) as minNps,
+      MAX(nps_score) as maxNps,
+      SUM(CASE WHEN nps_score >= 9 THEN 1 ELSE 0 END) as promoters,
+      SUM(CASE WHEN nps_score BETWEEN 7 AND 8 THEN 1 ELSE 0 END) as passives,
+      SUM(CASE WHEN nps_score <= 6 THEN 1 ELSE 0 END) as detractors
+    FROM survey_responses ${where}
+  `).get() as any;
+
+  const count = row.count as number;
+  const promoters = row.promoters as number;
+  const detractors = row.detractors as number;
+  const nps = count > 0
+    ? Math.round(((promoters / count) - (detractors / count)) * 100)
+    : null;
+
+  return {
+    count,
+    avgNps: count > 0 ? Math.round(row.avgNps * 10) / 10 : 0,
+    minNps: count > 0 ? (row.minNps as number) : null,
+    maxNps: count > 0 ? (row.maxNps as number) : null,
+    nps,
+    promoters,
+    passives: row.passives as number,
+    detractors,
+  };
+}
+
+export function getSurveyResponses(limit = 50, offset = 0, devFilter: SurveyDevFilter = 'all'): { responses: SurveyResponse[]; total: number } {
+  const where = devWhere(devFilter);
+  const total = (db.prepare(`SELECT COUNT(*) as c FROM survey_responses ${where}`).get() as { c: number }).c;
+  const responses = db.prepare(`
+    SELECT id, created_at, game_id, player_name, session_id, nps_score, comment, improvement, client_version, is_dev
+    FROM survey_responses ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?
+  `).all(limit, offset) as SurveyResponse[];
+  return { responses, total };
 }
