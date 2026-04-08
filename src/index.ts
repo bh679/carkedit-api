@@ -6,7 +6,7 @@ import express from "express";
 import multer from "multer";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
-import { initDatabase, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses } from "./db/database.js";
+import { initDatabase, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag } from "./db/users.js";
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, getPackStats, listPackStatsAll } from "./db/packs.js";
 import { optionalAuth, requireAuth, requireAdmin, setFirebaseAvailable } from "./middleware/auth.js";
@@ -225,6 +225,36 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Get game events error:", err);
         res.status(500).json({ error: "Failed to retrieve game events" });
+      }
+    });
+
+    app.patch("/api/carkedit/games/:id/dev", requireAdmin(), (req: any, res: any) => {
+      try {
+        const { is_dev } = req.body;
+        if (typeof is_dev !== 'boolean') {
+          return res.status(400).json({ error: "is_dev (boolean) is required" });
+        }
+        const game = setGameDev(req.params.id, is_dev);
+        if (!game) return res.status(404).json({ error: "Game not found" });
+        res.json(game);
+      } catch (err) {
+        console.error("[CarkedIt API] Set game dev error:", err);
+        res.status(500).json({ error: "Failed to set game dev" });
+      }
+    });
+
+    app.patch("/api/carkedit/surveys/:id/dev", requireAdmin(), (req: any, res: any) => {
+      try {
+        const { is_dev } = req.body;
+        if (typeof is_dev !== 'boolean') {
+          return res.status(400).json({ error: "is_dev (boolean) is required" });
+        }
+        const survey = setSurveyDev(req.params.id, is_dev);
+        if (!survey) return res.status(404).json({ error: "Survey not found" });
+        res.json(survey);
+      } catch (err) {
+        console.error("[CarkedIt API] Set survey dev error:", err);
+        res.status(500).json({ error: "Failed to set survey dev" });
       }
     });
 
