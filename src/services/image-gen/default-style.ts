@@ -36,6 +36,8 @@ export const DEFAULT_STYLE: StyleJson = {
     die: {
       prefix: "Died from",
       annotation: "a death-themed playing card illustration",
+      splitCompositionA: "Subject positioned in the top-left of the frame",
+      splitCompositionB: "Subject positioned in the bottom-right of the frame",
     },
     bye: {
       prefix: "",

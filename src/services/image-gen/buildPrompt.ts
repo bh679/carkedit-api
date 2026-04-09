@@ -11,6 +11,8 @@ export interface BuildPromptInput {
   cardPrompt?: string | null;
   deckType?: string | null;
   style?: StyleJson | null;
+  /** For split/WYR cards: 'a' or 'b' to inject directional composition. */
+  splitPosition?: 'a' | 'b' | null;
 }
 
 /**
@@ -46,11 +48,12 @@ export function humanizeKey(key: string): string {
  * object, which is stable in modern JS engines.
  */
 export function buildPrompt(input: BuildPromptInput): string {
-  const { cardText, cardPrompt, deckType, style } = input;
+  const { cardText, cardPrompt, deckType, style, splitPosition } = input;
 
   // Extract per-deck config from the nested `decks` sub-object.
   let deckPrefix = "";
   let deckAnnotation = "";
+  let splitComposition = "";
   if (style && typeof style === "object") {
     const nested = (style as Record<string, any>).decks;
     if (nested && typeof nested === "object" && deckType) {
@@ -62,6 +65,12 @@ export function buildPrompt(input: BuildPromptInput): string {
         if (typeof cfg.annotation === "string" && cfg.annotation.trim()) {
           deckAnnotation = cfg.annotation.trim();
         }
+        // Directional composition for split/WYR card halves.
+        if (splitPosition === 'a' && typeof cfg.splitCompositionA === "string" && cfg.splitCompositionA.trim()) {
+          splitComposition = cfg.splitCompositionA.trim();
+        } else if (splitPosition === 'b' && typeof cfg.splitCompositionB === "string" && cfg.splitCompositionB.trim()) {
+          splitComposition = cfg.splitCompositionB.trim();
+        }
       }
     }
   }
@@ -69,6 +78,7 @@ export function buildPrompt(input: BuildPromptInput): string {
   const cardParts: string[] = [];
   if (cardText && cardText.trim()) cardParts.push(cardText.trim());
   if (cardPrompt && cardPrompt.trim()) cardParts.push(cardPrompt.trim());
+  if (splitComposition) cardParts.push(splitComposition);
   if (deckAnnotation) cardParts.push(`(${deckAnnotation})`);
   const cardBody = cardParts.join(". ");
   const cardSection = deckPrefix && cardBody
