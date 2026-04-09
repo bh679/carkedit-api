@@ -29,8 +29,17 @@ export function humanizeKey(key: string): string {
  * Deterministic assembly of a prompt from card + style data.
  *
  * Shape:
- *   "<cardText>. <cardPrompt>. (<deckType> card for a board game).
+ *   "<deckPrefix>: <cardText>. <cardPrompt>. (<deckAnnotation>).
  *    Style: renderStyle: ...; lineWork: ...; ..."
+ *
+ * Per-deck config is pulled from `style.decks[deckType]` which is a
+ * nested `{ prefix, annotation }` object:
+ *   - `prefix`     — prepended to the card section as `"<prefix>: <cardText>…"`
+ *   - `annotation` — parenthesized and appended to the card sentences
+ *                    ("<cardText>. (<annotation>)")
+ * Either or both can be empty; empty = nothing inserted. The nested
+ * `decks` object is filtered out of the style iteration so it never
+ * appears verbatim in the style clause.
  *
  * Empty/whitespace fields are dropped so the result never has dangling
  * punctuation. The order of style fields follows the order of the input
@@ -39,19 +48,40 @@ export function humanizeKey(key: string): string {
 export function buildPrompt(input: BuildPromptInput): string {
   const { cardText, cardPrompt, deckType, style } = input;
 
+  // Extract per-deck config from the nested `decks` sub-object.
+  let deckPrefix = "";
+  let deckAnnotation = "";
+  if (style && typeof style === "object") {
+    const nested = (style as Record<string, any>).decks;
+    if (nested && typeof nested === "object" && deckType) {
+      const cfg = nested[deckType];
+      if (cfg && typeof cfg === "object") {
+        if (typeof cfg.prefix === "string" && cfg.prefix.trim()) {
+          deckPrefix = cfg.prefix.trim();
+        }
+        if (typeof cfg.annotation === "string" && cfg.annotation.trim()) {
+          deckAnnotation = cfg.annotation.trim();
+        }
+      }
+    }
+  }
+
   const cardParts: string[] = [];
   if (cardText && cardText.trim()) cardParts.push(cardText.trim());
   if (cardPrompt && cardPrompt.trim()) cardParts.push(cardPrompt.trim());
-  if (deckType && deckType.trim()) {
-    cardParts.push(`(${deckType.trim()} card for a board game)`);
-  }
-  const cardSection = cardParts.join(". ");
+  if (deckAnnotation) cardParts.push(`(${deckAnnotation})`);
+  const cardBody = cardParts.join(". ");
+  const cardSection = deckPrefix && cardBody
+    ? `${deckPrefix}: ${cardBody}`
+    : (deckPrefix || cardBody);
 
   let styleSection = "";
   if (style && typeof style === "object") {
     const styleParts = Object.entries(style)
-      .filter(([, v]) => typeof v === "string" && v.trim().length > 0)
-      .map(([k, v]) => `${humanizeKey(k)}: ${v.trim()}`);
+      // Skip the nested `decks` object — its prefix/annotation are used
+      // above, not as flat style fields.
+      .filter(([k, v]) => k !== "decks" && typeof v === "string" && v.trim().length > 0)
+      .map(([k, v]) => `${humanizeKey(k)}: ${(v as string).trim()}`);
     if (styleParts.length > 0) {
       styleSection = `Style: ${styleParts.join("; ")}.`;
     }
