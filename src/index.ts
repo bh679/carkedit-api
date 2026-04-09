@@ -42,7 +42,9 @@ const server = defineServer({
     game: defineRoom(GameRoom),
   },
   express: (app) => {
-    app.use(express.json());
+    // Increased limit to 10MB to support base64-encoded reference images
+    // in image-editing requests (e.g. mystery card question mark).
+    app.use(express.json({ limit: '10mb' }));
 
     // Force browsers to revalidate HTML pages (picks up new versioned asset URLs)
     app.use((req, res, next) => {
@@ -936,7 +938,7 @@ const server = defineServer({
 
     app.post("/api/carkedit/image-gen/generate", requireAdmin(), async (req: any, res: any) => {
       try {
-        const { providerId, cardText, cardPrompt, deckType, style, promptOverride, options, splitPosition } = req.body || {};
+        const { providerId, cardText, cardPrompt, deckType, style, promptOverride, options, splitPosition, inputImage, cardSpecial } = req.body || {};
 
         if (!providerId || typeof providerId !== 'string') {
           return res.status(400).json({ error: "providerId is required" });
@@ -960,6 +962,7 @@ const server = defineServer({
               deckType: typeof deckType === 'string' ? deckType : null,
               style: (style && typeof style === 'object') ? style : null,
               splitPosition: (splitPosition === 'a' || splitPosition === 'b') ? splitPosition : null,
+              cardSpecial: typeof cardSpecial === 'string' ? cardSpecial : null,
             });
 
         if (!prompt || prompt.trim().length === 0) {
@@ -970,6 +973,7 @@ const server = defineServer({
           prompt,
           style: (style && typeof style === 'object') ? style : undefined,
           options: (options && typeof options === 'object') ? options : undefined,
+          inputImage: typeof inputImage === 'string' ? inputImage : undefined,
         });
 
         // --- Auto-save the generated image + card context ---
@@ -1087,7 +1091,7 @@ const server = defineServer({
       };
 
       try {
-        const { providerId, cardText, cardPrompt, deckType, style, promptOverride, options, splitPosition } = req.body || {};
+        const { providerId, cardText, cardPrompt, deckType, style, promptOverride, options, splitPosition, inputImage, cardSpecial } = req.body || {};
 
         if (!providerId || typeof providerId !== 'string') {
           sendEvent('error', { error: 'providerId is required' });
@@ -1112,6 +1116,7 @@ const server = defineServer({
               deckType: typeof deckType === 'string' ? deckType : null,
               style: (style && typeof style === 'object') ? style : null,
               splitPosition: (splitPosition === 'a' || splitPosition === 'b') ? splitPosition : null,
+              cardSpecial: typeof cardSpecial === 'string' ? cardSpecial : null,
             });
 
         if (!prompt || prompt.trim().length === 0) {
@@ -1125,6 +1130,7 @@ const server = defineServer({
           prompt,
           style: (style && typeof style === 'object') ? style : undefined,
           options: (options && typeof options === 'object') ? options : undefined,
+          inputImage: typeof inputImage === 'string' ? inputImage : undefined,
           onProgress: (info) => {
             sendEvent('progress', { phase: 'polling', ...info });
           },

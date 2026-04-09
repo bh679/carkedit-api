@@ -125,7 +125,7 @@ function createFluxProvider({
       const width = req.options?.width ?? 1024;
       const height = req.options?.height ?? 1024;
 
-      const body = {
+      const body: Record<string, any> = {
         prompt: req.prompt,
         width,
         height,
@@ -133,6 +133,13 @@ function createFluxProvider({
         safety_tolerance: 5,
         output_format: "png",
       };
+
+      // Image-editing mode: when a reference image is provided, include it
+      // as `input_image`. The same BFL endpoint switches from text-to-image
+      // to image-editing when this field is present.
+      if (req.inputImage) {
+        body.input_image = req.inputImage;
+      }
 
       const createRes = await fetch(`${BFL_API_BASE}/${slug}`, {
         method: "POST",
@@ -163,7 +170,7 @@ function createFluxProvider({
         imageUrl,
         provider: id,
         promptSent: req.prompt,
-        meta: { ...meta, width, height },
+        meta: { ...meta, width, height, imageEditing: !!req.inputImage },
         tokensUsed: pricing.tokensPerImage,
         costUsd: pricing.costPerMegapixel * megapixels,
       };

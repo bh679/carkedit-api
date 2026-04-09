@@ -30,6 +30,12 @@ export interface GenerateRequest {
     width?: number;
     height?: number;
   };
+  /**
+   * Base64-encoded reference image for image-editing mode (FLUX.2).
+   * When present, providers that support it send this as `input_image`
+   * so the generation reskins the reference rather than creating from scratch.
+   */
+  inputImage?: string;
   /** Optional progress callback — called on every poll tick during generation. */
   onProgress?: ProgressCallback;
 }
