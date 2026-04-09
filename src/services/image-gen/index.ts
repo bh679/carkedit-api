@@ -26,6 +26,7 @@ export function listProviders(): ProviderInfo[] {
     id: p.id,
     label: p.label,
     configured: p.isConfigured(),
+    pricing: p.pricing,
   }));
 }
 
@@ -34,6 +35,7 @@ export function getProvider(id: string): ImageGenProvider | null {
 }
 
 export { buildPrompt } from "./buildPrompt.js";
+export { PROVIDER_PRICING } from "./pricing.js";
 export type {
   ImageGenProvider,
   GenerateRequest,

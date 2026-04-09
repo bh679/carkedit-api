@@ -203,6 +203,8 @@ export interface GenerationLogEntry {
   image_url_b: string | null;  // reserved for dual-image split cards
   provider: string;            // e.g. 'flux-2-pro'
   prompt_sent: string;         // exact final prompt sent upstream
+  tokens_used: number | null;  // provider credits/tokens consumed (null = pre-tracking)
+  cost_usd: number | null;     // estimated cost in USD (null = pre-tracking)
   created_at: string;
 }
 

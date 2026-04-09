@@ -43,6 +43,19 @@ export interface GenerateResponse {
   promptSent: string;
   /** Free-form provider-specific metadata (job id, seed, etc). */
   meta?: Record<string, any>;
+  /** Tokens/credits consumed by this generation (null if provider doesn't report). */
+  tokensUsed?: number | null;
+  /** Estimated cost in USD for this single generation. */
+  costUsd?: number | null;
+}
+
+export interface ProviderPricing {
+  /** Cost in USD per megapixel of output image. */
+  costPerMegapixel: number;
+  /** Provider-specific token/credit count per image (null if N/A). */
+  tokensPerImage: number | null;
+  /** URL to the provider's pricing page. */
+  pricingUrl: string;
 }
 
 export interface ImageGenProvider {
@@ -50,6 +63,8 @@ export interface ImageGenProvider {
   id: string;
   /** Human-readable label for the UI. */
   label: string;
+  /** Known pricing for this provider tier. */
+  pricing: ProviderPricing;
   /**
    * Returns true when the provider has everything it needs to run
    * (typically: API key env var present).
@@ -62,4 +77,5 @@ export interface ProviderInfo {
   id: string;
   label: string;
   configured: boolean;
+  pricing: ProviderPricing;
 }
