@@ -6,7 +6,7 @@ import express from "express";
 import multer from "multer";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
-import { initDatabase, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev } from "./db/database.js";
+import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag } from "./db/users.js";
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, getPackStats, listPackStatsAll } from "./db/packs.js";
 import { createGenerationLog, listGenerationLog } from "./db/generation-log.js";
@@ -61,6 +61,14 @@ const server = defineServer({
     fs.mkdirSync(brandsDir, { recursive: true });
     fs.mkdirSync(cardImagesDir, { recursive: true });
     app.use('/uploads', express.static(uploadsDir));
+    // Also mount uploads under the /api/carkedit/* prefix that Apache
+    // on brennan.games already proxies. The production Apache host
+    // doesn't have a ProxyPass rule for `/uploads/*`, so image URLs
+    // stored as `/uploads/card-images/...` return 404 in the browser.
+    // Serving the same directory under `/api/carkedit/uploads/*`
+    // piggy-backs on the existing API proxy. The legacy `/uploads`
+    // mount above stays for localhost/backwards compat.
+    app.use('/api/carkedit/uploads', express.static(uploadsDir));
 
     // PNG / WebP / SVG — all support transparency. JPEG excluded.
     const ALLOWED_BRAND_MIME = new Set(['image/png', 'image/webp', 'image/svg+xml']);
@@ -1006,7 +1014,10 @@ const server = defineServer({
           const filename = `gen-${randomUUID()}-${Date.now()}${ext}`;
           const filepath = path.join(cardImagesDir, filename);
           fs.writeFileSync(filepath, buffer);
-          localImageUrl = `/uploads/card-images/${filename}`;
+          // Served via `app.use('/api/carkedit/uploads', …)` above so
+          // the image URL flows through brennan.games's existing
+          // /api/carkedit/* Apache proxy.
+          localImageUrl = `/api/carkedit/uploads/card-images/${filename}`;
 
           // Normalise Split options to a JSON string if provided
           const cardSpecialStr = normalizeCardSpecial(req.body?.card_special ?? null);
@@ -1114,7 +1125,9 @@ const server = defineServer({
           fs.writeFileSync(filepath, buffer);
 
           // Best-effort cleanup of the previous image for this card.
-          const relUrl = `/uploads/card-images/${filename}`;
+          // Served via `app.use('/api/carkedit/uploads', …)` so the URL
+          // flows through brennan.games's /api/carkedit/* Apache proxy.
+          const relUrl = `/api/carkedit/uploads/card-images/${filename}`;
           const updated = updateCard(req.params.id, req.params.cardId, {
             image_url: relUrl,
           });
@@ -1135,6 +1148,31 @@ const server = defineServer({
 
 initDatabase();
 console.log("[CarkedIt API] Database initialized");
+
+// One-time idempotent migration: rewrite any historical image_url /
+// image_url_b values that start with `/uploads/` to `/api/carkedit/uploads/`.
+// This unsticks rows written by v0.01.0037 and earlier, which stored
+// origin-relative upload paths that Apache on brennan.games couldn't
+// resolve. Idempotent because after the rewrite, `LIKE '/uploads/%'`
+// no longer matches the prefixed rows.
+try {
+  const _db = getDb();
+  const changesA = _db.prepare(
+    "UPDATE generation_log SET image_url = '/api/carkedit' || image_url WHERE image_url LIKE '/uploads/%'"
+  ).run();
+  const changesB = _db.prepare(
+    "UPDATE generation_log SET image_url_b = '/api/carkedit' || image_url_b WHERE image_url_b LIKE '/uploads/%'"
+  ).run();
+  const changesC = _db.prepare(
+    "UPDATE expansion_cards SET image_url = '/api/carkedit' || image_url WHERE image_url LIKE '/uploads/%'"
+  ).run();
+  const total = (changesA.changes || 0) + (changesB.changes || 0) + (changesC.changes || 0);
+  if (total > 0) {
+    console.log(`[CarkedIt API] Migrated ${total} legacy /uploads/ paths to /api/carkedit/uploads/`);
+  }
+} catch (err) {
+  console.error("[CarkedIt API] Upload-path migration failed:", err);
+}
 
 server.listen(port);
 console.log(`[CarkedIt API] Listening on port ${port}`);
