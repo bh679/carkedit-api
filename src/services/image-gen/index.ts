@@ -6,11 +6,19 @@
 
 import type { ImageGenProvider, ProviderInfo } from "./types.js";
 import { leonardoPhoenix1 } from "./providers/leonardo.js";
-import { flux2Pro } from "./providers/flux.js";
+import {
+  flux2Pro,
+  flux2Max,
+  flux2Klein9b,
+  flux2Klein4b,
+} from "./providers/flux.js";
 
 const providers: Record<string, ImageGenProvider> = {
   [leonardoPhoenix1.id]: leonardoPhoenix1,
   [flux2Pro.id]: flux2Pro,
+  [flux2Max.id]: flux2Max,
+  [flux2Klein9b.id]: flux2Klein9b,
+  [flux2Klein4b.id]: flux2Klein4b,
 };
 
 export function listProviders(): ProviderInfo[] {
