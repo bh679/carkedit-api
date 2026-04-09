@@ -932,7 +932,7 @@ const server = defineServer({
 
     app.post("/api/carkedit/image-gen/generate", requireAdmin(), async (req: any, res: any) => {
       try {
-        const { providerId, cardText, cardPrompt, deckType, style, promptOverride, options } = req.body || {};
+        const { providerId, cardText, cardPrompt, deckType, style, promptOverride, options, splitPosition } = req.body || {};
 
         if (!providerId || typeof providerId !== 'string') {
           return res.status(400).json({ error: "providerId is required" });
@@ -955,6 +955,7 @@ const server = defineServer({
               cardPrompt: typeof cardPrompt === 'string' ? cardPrompt : null,
               deckType: typeof deckType === 'string' ? deckType : null,
               style: (style && typeof style === 'object') ? style : null,
+              splitPosition: (splitPosition === 'a' || splitPosition === 'b') ? splitPosition : null,
             });
 
         if (!prompt || prompt.trim().length === 0) {
