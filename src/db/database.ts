@@ -196,6 +196,28 @@ export function initDatabase(): void {
     CREATE INDEX IF NOT EXISTS idx_survey_game_id ON survey_responses(game_id);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_survey_game_session
       ON survey_responses(game_id, session_id) WHERE session_id IS NOT NULL;
+
+    -- Test admin page: every click of Generate on /admin-image-gen.html
+    -- writes a row here so the Recent generations gallery can replay
+    -- the full card context + the locally-downloaded image URL. Kept
+    -- separate from expansion_cards so the log can grow without
+    -- polluting the real deck.
+    CREATE TABLE IF NOT EXISTS generation_log (
+      id TEXT PRIMARY KEY,
+      creator_id TEXT,
+      deck_type TEXT NOT NULL,
+      text TEXT NOT NULL DEFAULT '',
+      prompt TEXT,
+      card_special TEXT,
+      options_json TEXT,
+      image_url TEXT NOT NULL,
+      image_url_b TEXT,
+      provider TEXT NOT NULL,
+      prompt_sent TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_gen_log_created ON generation_log(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_gen_log_creator ON generation_log(creator_id);
   `);
 
   // Migrate: add new columns if they don't exist (for existing DBs)

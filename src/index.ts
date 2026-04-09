@@ -9,6 +9,7 @@ import { GameRoom } from "./rooms/GameRoom.js";
 import { initDatabase, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag } from "./db/users.js";
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, getPackStats, listPackStatsAll } from "./db/packs.js";
+import { createGenerationLog, listGenerationLog } from "./db/generation-log.js";
 import { optionalAuth, requireAuth, requireAdmin, setFirebaseAvailable } from "./middleware/auth.js";
 import type { GameResult, IssueReport } from "./db/types.js";
 import { listProviders, getProvider, buildPrompt } from "./services/image-gen/index.js";
@@ -875,6 +876,27 @@ const server = defineServer({
       }
     });
 
+    app.get("/api/carkedit/image-gen/log", requireAdmin(), (req: any, res: any) => {
+      try {
+        const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '50'), 10) || 50, 1), 200);
+        const offset = Math.max(parseInt(String(req.query.offset ?? '0'), 10) || 0, 0);
+        const scope = String(req.query.scope ?? 'all');
+        let creator_id: string | undefined;
+        if (scope === 'mine') {
+          creator_id = req.localUser?.id;
+          if (!creator_id) return res.json({ entries: [] });
+        }
+        // 'all' and 'admins' both pass through without a creator_id filter —
+        // until we let non-admins write to the log they're equivalent, but
+        // keeping both as accepted values future-proofs the UI.
+        const entries = listGenerationLog({ creator_id, limit, offset });
+        res.json({ entries });
+      } catch (err: any) {
+        console.error("[CarkedIt API] list generation log error:", err);
+        res.status(500).json({ error: err?.message || "Failed to list generation log" });
+      }
+    });
+
     app.post("/api/carkedit/image-gen/generate", requireAdmin(), async (req: any, res: any) => {
       try {
         const { providerId, cardText, cardPrompt, deckType, style, promptOverride, options } = req.body || {};
@@ -911,7 +933,86 @@ const server = defineServer({
           style: (style && typeof style === 'object') ? style : undefined,
           options: (options && typeof options === 'object') ? options : undefined,
         });
-        res.json(result);
+
+        // --- Auto-save the generated image + card context ---
+        //
+        // Download the provider URL immediately (signed URLs can expire in
+        // minutes), write to /uploads/card-images/, and record a row in
+        // generation_log. Return the LOCAL URL to the client so the preview
+        // shows the persistent image (not the expiring provider URL).
+        //
+        // If this step fails *after* the provider succeeded, we still
+        // return the provider URL to the client so the user isn't billed
+        // for nothing — but we log the error so persistence issues are
+        // visible in the server logs.
+        let localImageUrl = result.imageUrl;
+        let logId: string | null = null;
+        let logWarning: string | null = null;
+        try {
+          const fetchRes = await fetch(result.imageUrl);
+          if (!fetchRes.ok) {
+            throw new Error(`provider download ${fetchRes.status}`);
+          }
+          const contentType = (fetchRes.headers.get('content-type') || '').toLowerCase();
+          const extMap: Record<string, string> = {
+            'image/png': '.png',
+            'image/webp': '.webp',
+            'image/jpeg': '.jpg',
+            'image/jpg': '.jpg',
+            'image/gif': '.gif',
+          };
+          let ext = extMap[contentType] || '';
+          if (!ext) {
+            try {
+              const parsed = new URL(result.imageUrl);
+              const pathExt = path.extname(parsed.pathname).toLowerCase();
+              if (['.png', '.webp', '.jpg', '.jpeg', '.gif'].includes(pathExt)) {
+                ext = pathExt === '.jpeg' ? '.jpg' : pathExt;
+              }
+            } catch {}
+          }
+          if (!ext) ext = '.png';
+
+          const buffer = Buffer.from(await fetchRes.arrayBuffer());
+          const MAX_BYTES = 15 * 1024 * 1024;
+          if (buffer.length > MAX_BYTES) {
+            throw new Error("image too large (>15MB)");
+          }
+          const filename = `gen-${randomUUID()}-${Date.now()}${ext}`;
+          const filepath = path.join(cardImagesDir, filename);
+          fs.writeFileSync(filepath, buffer);
+          localImageUrl = `/uploads/card-images/${filename}`;
+
+          // Normalise Split options to a JSON string if provided
+          const cardSpecialStr = normalizeCardSpecial(req.body?.card_special ?? null);
+          const optionsArrRaw = req.body?.options;
+          const optionsJson = Array.isArray(optionsArrRaw) && optionsArrRaw.length > 0
+            ? JSON.stringify(optionsArrRaw)
+            : null;
+
+          const logRow = createGenerationLog({
+            creator_id: req.localUser?.id ?? null,
+            deck_type: typeof deckType === 'string' ? deckType : 'die',
+            text: typeof cardText === 'string' ? cardText : '',
+            prompt: typeof cardPrompt === 'string' && cardPrompt.trim() ? cardPrompt.trim() : null,
+            card_special: cardSpecialStr,
+            options_json: optionsJson,
+            image_url: localImageUrl,
+            provider: result.provider,
+            prompt_sent: result.promptSent,
+          });
+          logId = logRow.id;
+        } catch (err: any) {
+          console.error("[CarkedIt API] auto-save generation failed:", err);
+          logWarning = err?.message || 'auto-save failed';
+        }
+
+        res.json({
+          ...result,
+          imageUrl: localImageUrl,
+          logId,
+          logWarning,
+        });
       } catch (err: any) {
         console.error("[CarkedIt API] image-gen generate error:", err);
         res.status(502).json({ error: err?.message || "Image generation failed" });

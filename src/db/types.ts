@@ -185,6 +185,27 @@ export interface PackWithCards extends ExpansionPack {
   cards: ExpansionCard[];
 }
 
+/**
+ * A row in the `generation_log` table — one per Generate click on
+ * the admin-image-gen test page. Captures the full card context +
+ * the locally-downloaded image path so the Recent generations
+ * gallery can replay it even after the provider URL has expired.
+ */
+export interface GenerationLogEntry {
+  id: string;
+  creator_id: string | null;
+  deck_type: 'die' | 'live' | 'bye';
+  text: string;
+  prompt: string | null;
+  card_special: string | null;
+  options_json: string | null;
+  image_url: string;           // /uploads/card-images/gen-*.{png,jpg,webp}
+  image_url_b: string | null;  // reserved for dual-image split cards
+  provider: string;            // e.g. 'flux-2-pro'
+  prompt_sent: string;         // exact final prompt sent upstream
+  created_at: string;
+}
+
 export interface SurveyResponse {
   id: string;
   created_at: string;
