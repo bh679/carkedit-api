@@ -840,17 +840,57 @@ const server = defineServer({
       }
     });
 
+    // Style JSON lives on the API filesystem — single source of truth.
+    // The checked-in default at
+    // src/services/image-gen/default-style.json is the bootstrap value.
+    // Runtime edits land at <api-root>/data/image-gen-style.json
+    // (alongside games.db) and beat the default on subsequent GETs.
+    //
+    // The previous batch-6 route wrote to <CLIENT_DIR>/js/data/... which
+    // broke on production where the frontend's static files live under
+    // a different Apache-fronted path. Moving the source of truth here
+    // decouples the style editor from the frontend deploy layout, so
+    // the admin page works regardless of whether it's mounted at root
+    // or under a subpath like /carkedit-online/.
+    const styleDataDir = path.join(__dirname, '../data');
+    const runtimeStylePath = path.join(styleDataDir, 'image-gen-style.json');
+    const defaultStylePath = path.join(__dirname, 'services/image-gen/default-style.json');
+
+    /**
+     * GET /api/carkedit/image-gen/style
+     *
+     * Returns the current style JSON, reading from runtimeStylePath if
+     * it exists (the admin has saved something) and falling back to the
+     * shipped default otherwise. Returns `{ style: {} }` with 200 if
+     * both files are missing so the admin page still mounts gracefully.
+     */
+    app.get("/api/carkedit/image-gen/style", requireAdmin(), (_req: any, res: any) => {
+      try {
+        const candidates = [runtimeStylePath, defaultStylePath];
+        for (const p of candidates) {
+          if (fs.existsSync(p)) {
+            const raw = fs.readFileSync(p, 'utf8');
+            const style = JSON.parse(raw);
+            return res.json({ style });
+          }
+        }
+        res.json({ style: {} });
+      } catch (err: any) {
+        console.error("[CarkedIt API] Get style error:", err);
+        res.status(500).json({ error: err?.message || "Failed to read style JSON" });
+      }
+    });
+
     /**
      * POST /api/carkedit/image-gen/style
      *
-     * Persist the admin page's style editor contents back to the shipped
-     * default file at `<CLIENT_DIR>/js/data/image-gen-style.json`. The
-     * file path is hardcoded relative to `clientDir`, so no part of the
-     * request body influences where the write lands — safe from
-     * directory traversal. The client sends `{ style: <object> }`; the
-     * server validates it's a non-array plain object and pretty-prints
-     * with 2-space indent + trailing newline (matching how we author
-     * the file by hand).
+     * Persist the admin page's style editor contents to
+     * <api-root>/data/image-gen-style.json. The write path is hardcoded
+     * relative to `__dirname`, so no part of the request body influences
+     * where the write lands — safe from directory traversal. The client
+     * sends `{ style: <object> }`; the server validates it's a non-array
+     * plain object and pretty-prints with 2-space indent + trailing
+     * newline.
      */
     app.post("/api/carkedit/image-gen/style", requireAdmin(), (req: any, res: any) => {
       try {
@@ -858,18 +898,10 @@ const server = defineServer({
         if (!style || typeof style !== 'object' || Array.isArray(style)) {
           return res.status(400).json({ error: "style must be a plain object" });
         }
-        const STYLE_REL_PATH = 'js/data/image-gen-style.json';
-        const stylePath = path.join(clientDir, STYLE_REL_PATH);
-        // Guard against clientDir misconfig pointing somewhere weird.
-        const resolved = path.resolve(stylePath);
-        const clientResolved = path.resolve(clientDir);
-        if (!resolved.startsWith(clientResolved + path.sep)) {
-          return res.status(500).json({ error: "Refusing to write outside CLIENT_DIR" });
-        }
+        fs.mkdirSync(styleDataDir, { recursive: true });
         const jsonText = JSON.stringify(style, null, 2) + '\n';
-        fs.mkdirSync(path.dirname(resolved), { recursive: true });
-        fs.writeFileSync(resolved, jsonText, 'utf8');
-        res.json({ ok: true, bytes: Buffer.byteLength(jsonText, 'utf8'), path: '/' + STYLE_REL_PATH });
+        fs.writeFileSync(runtimeStylePath, jsonText, 'utf8');
+        res.json({ ok: true, bytes: Buffer.byteLength(jsonText, 'utf8'), path: 'data/image-gen-style.json' });
       } catch (err: any) {
         console.error("[CarkedIt API] Save style error:", err);
         res.status(500).json({ error: err?.message || "Failed to save style JSON" });
