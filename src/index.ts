@@ -839,6 +839,42 @@ const server = defineServer({
       }
     });
 
+    /**
+     * POST /api/carkedit/image-gen/style
+     *
+     * Persist the admin page's style editor contents back to the shipped
+     * default file at `<CLIENT_DIR>/js/data/image-gen-style.json`. The
+     * file path is hardcoded relative to `clientDir`, so no part of the
+     * request body influences where the write lands — safe from
+     * directory traversal. The client sends `{ style: <object> }`; the
+     * server validates it's a non-array plain object and pretty-prints
+     * with 2-space indent + trailing newline (matching how we author
+     * the file by hand).
+     */
+    app.post("/api/carkedit/image-gen/style", requireAdmin(), (req: any, res: any) => {
+      try {
+        const { style } = req.body || {};
+        if (!style || typeof style !== 'object' || Array.isArray(style)) {
+          return res.status(400).json({ error: "style must be a plain object" });
+        }
+        const STYLE_REL_PATH = 'js/data/image-gen-style.json';
+        const stylePath = path.join(clientDir, STYLE_REL_PATH);
+        // Guard against clientDir misconfig pointing somewhere weird.
+        const resolved = path.resolve(stylePath);
+        const clientResolved = path.resolve(clientDir);
+        if (!resolved.startsWith(clientResolved + path.sep)) {
+          return res.status(500).json({ error: "Refusing to write outside CLIENT_DIR" });
+        }
+        const jsonText = JSON.stringify(style, null, 2) + '\n';
+        fs.mkdirSync(path.dirname(resolved), { recursive: true });
+        fs.writeFileSync(resolved, jsonText, 'utf8');
+        res.json({ ok: true, bytes: Buffer.byteLength(jsonText, 'utf8'), path: '/' + STYLE_REL_PATH });
+      } catch (err: any) {
+        console.error("[CarkedIt API] Save style error:", err);
+        res.status(500).json({ error: err?.message || "Failed to save style JSON" });
+      }
+    });
+
     app.post("/api/carkedit/image-gen/generate", requireAdmin(), async (req: any, res: any) => {
       try {
         const { providerId, cardText, cardPrompt, deckType, style, promptOverride, options } = req.body || {};
