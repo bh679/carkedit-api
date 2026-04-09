@@ -9,7 +9,7 @@ import { GameRoom } from "./rooms/GameRoom.js";
 import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag } from "./db/users.js";
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, getPackStats, listPackStatsAll } from "./db/packs.js";
-import { createGenerationLog, listGenerationLog } from "./db/generation-log.js";
+import { createGenerationLog, listGenerationLog, mergeLogEntries } from "./db/generation-log.js";
 import { optionalAuth, requireAuth, requireAdmin, setFirebaseAvailable } from "./middleware/auth.js";
 import type { GameResult, IssueReport } from "./db/types.js";
 import { listProviders, getProvider, buildPrompt } from "./services/image-gen/index.js";
@@ -1053,6 +1053,39 @@ const server = defineServer({
       } catch (err: any) {
         console.error("[CarkedIt API] image-gen generate error:", err);
         res.status(502).json({ error: err?.message || "Image generation failed" });
+      }
+    });
+
+    /**
+     * Merge two split-card generation log entries into one.
+     *
+     * After generating both halves of a split/WYR card in parallel, the
+     * frontend calls this to fold the second entry's image into the first
+     * entry's image_url_b, then deletes the second entry. The Recent
+     * generations gallery then shows a single combined card.
+     */
+    app.post("/api/carkedit/image-gen/log/merge", requireAdmin(), (req: any, res: any) => {
+      try {
+        const { keepId, mergeId, updates } = req.body || {};
+        if (!keepId || typeof keepId !== 'string') {
+          return res.status(400).json({ error: "keepId is required" });
+        }
+        if (!mergeId || typeof mergeId !== 'string') {
+          return res.status(400).json({ error: "mergeId is required" });
+        }
+        if (!updates || typeof updates !== 'object' || !updates.image_url_b) {
+          return res.status(400).json({ error: "updates.image_url_b is required" });
+        }
+        const merged = mergeLogEntries(keepId, mergeId, {
+          image_url_b: updates.image_url_b,
+          text: typeof updates.text === 'string' ? updates.text : undefined,
+          card_special: typeof updates.card_special === 'string' ? updates.card_special : undefined,
+          options_json: typeof updates.options_json === 'string' ? updates.options_json : undefined,
+        });
+        res.json({ entry: merged });
+      } catch (err: any) {
+        console.error("[CarkedIt API] merge log entries error:", err);
+        res.status(500).json({ error: err?.message || "Failed to merge log entries" });
       }
     });
 

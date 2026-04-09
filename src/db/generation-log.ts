@@ -90,3 +90,49 @@ export function getGenerationLog(id: string): GenerationLogEntry | null {
     .get(id) as GenerationLogEntry | undefined;
   return row ?? null;
 }
+
+/**
+ * Merge two split-card log entries into one.
+ *
+ * Copies selected fields from `updates` onto the "keep" row, sets its
+ * `image_url_b`, then deletes the "merge" row — all in a single
+ * transaction so the log stays consistent.
+ */
+export function mergeLogEntries(
+  keepId: string,
+  mergeId: string,
+  updates: {
+    image_url_b: string;
+    text?: string;
+    card_special?: string | null;
+    options_json?: string | null;
+  },
+): GenerationLogEntry {
+  const db = getDb();
+
+  const keep = db.prepare("SELECT * FROM generation_log WHERE id = ?").get(keepId) as GenerationLogEntry | undefined;
+  if (!keep) throw new Error(`Log entry ${keepId} not found`);
+
+  const merge = db.prepare("SELECT * FROM generation_log WHERE id = ?").get(mergeId) as GenerationLogEntry | undefined;
+  if (!merge) throw new Error(`Log entry ${mergeId} not found`);
+
+  const run = db.transaction(() => {
+    db.prepare(
+      `UPDATE generation_log
+       SET image_url_b = ?, text = ?, card_special = ?, options_json = ?
+       WHERE id = ?`
+    ).run(
+      updates.image_url_b,
+      updates.text ?? keep.text,
+      updates.card_special ?? keep.card_special,
+      updates.options_json ?? keep.options_json,
+      keepId,
+    );
+    db.prepare("DELETE FROM generation_log WHERE id = ?").run(mergeId);
+  });
+  run();
+
+  return db
+    .prepare("SELECT * FROM generation_log WHERE id = ?")
+    .get(keepId) as GenerationLogEntry;
+}
