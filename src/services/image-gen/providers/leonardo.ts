@@ -76,7 +76,7 @@ async function pollForCompletion(
 export const leonardoPhoenix1: ImageGenProvider = {
   id: "leonardo-phoenix-1.0",
   label: "Leonardo Phoenix 1.0",
-  pricing: { baseCostUsd: 0.02, tokensPerImage: 24, pricingUrl: "https://leonardo.ai/pricing" },
+  pricing: { costPerMegapixel: 0.02, tokensPerImage: 24, pricingUrl: "https://leonardo.ai/pricing" },
 
   isConfigured() {
     return !!process.env.LEONARDO_API_KEY;
@@ -133,7 +133,7 @@ export const leonardoPhoenix1: ImageGenProvider = {
       promptSent: req.prompt,
       meta: { ...meta, width, height },
       tokensUsed: leonardoPhoenix1.pricing.tokensPerImage,
-      costUsd: leonardoPhoenix1.pricing.baseCostUsd,
+      costUsd: leonardoPhoenix1.pricing.costPerMegapixel * ((width * height) / 1_000_000),
     };
   },
 };

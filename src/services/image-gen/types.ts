@@ -40,8 +40,8 @@ export interface GenerateResponse {
 }
 
 export interface ProviderPricing {
-  /** Cost in USD per single image generation for this provider/tier. */
-  baseCostUsd: number;
+  /** Cost in USD per megapixel of output image. */
+  costPerMegapixel: number;
   /** Provider-specific token/credit count per image (null if N/A). */
   tokensPerImage: number | null;
   /** URL to the provider's pricing page. */
