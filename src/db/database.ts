@@ -214,6 +214,8 @@ export function initDatabase(): void {
       image_url_b TEXT,
       provider TEXT NOT NULL,
       prompt_sent TEXT NOT NULL,
+      tokens_used INTEGER,
+      cost_usd REAL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_gen_log_created ON generation_log(created_at DESC);
@@ -325,6 +327,15 @@ export function initDatabase(): void {
     }
     db.exec('CREATE INDEX IF NOT EXISTS idx_packs_status ON expansion_packs(status)');
     console.log('[CarkedIt API] Migration: dropped expansion_packs.visibility column');
+  }
+
+  // Migrate: add cost-tracking columns to generation_log (for existing DBs)
+  const genLogCols = db.prepare("PRAGMA table_info(generation_log)").all().map((c: any) => c.name);
+  if (!genLogCols.includes('tokens_used')) {
+    db.exec('ALTER TABLE generation_log ADD COLUMN tokens_used INTEGER');
+  }
+  if (!genLogCols.includes('cost_usd')) {
+    db.exec('ALTER TABLE generation_log ADD COLUMN cost_usd REAL');
   }
 }
 

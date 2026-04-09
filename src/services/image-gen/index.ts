@@ -26,6 +26,7 @@ export function listProviders(): ProviderInfo[] {
     id: p.id,
     label: p.label,
     configured: p.isConfigured(),
+    pricing: p.pricing,
   }));
 }
 

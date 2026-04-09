@@ -1037,6 +1037,8 @@ const server = defineServer({
             image_url: localImageUrl,
             provider: result.provider,
             prompt_sent: result.promptSent,
+            tokens_used: result.tokensUsed ?? null,
+            cost_usd: result.costUsd ?? null,
           });
           logId = logRow.id;
         } catch (err: any) {
