@@ -9,5 +9,6 @@ export class Card extends Schema {
   @type("string") special: string = "";     // "Wildcard" / "?" / "Split"
   @type("string") packId: string = "";      // Source expansion pack id, empty for base cards
   @type("string") prompt: string = "";      // Optional follow-up prompt rendered under the card text
+  @type("string") image_url: string = "";   // Optional custom-card illustration (served from /api/carkedit/uploads/card-images/)
   @type(["string"]) options = new ArraySchema<string>(); // Two choices for "Split" die cards
 }
