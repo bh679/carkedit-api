@@ -16,6 +16,7 @@ import type {
   GenerateResponse,
   ImageGenProvider,
 } from "../types.js";
+import { PROVIDER_PRICING } from "../pricing.js";
 
 const LEONARDO_API_BASE = "https://cloud.leonardo.ai/api/rest/v1";
 
@@ -76,7 +77,7 @@ async function pollForCompletion(
 export const leonardoPhoenix1: ImageGenProvider = {
   id: "leonardo-phoenix-1.0",
   label: "Leonardo Phoenix 1.0",
-  pricing: { costPerMegapixel: 0.02, tokensPerImage: 24, pricingUrl: "https://leonardo.ai/pricing" },
+  pricing: PROVIDER_PRICING["leonardo-phoenix-1.0"],
 
   isConfigured() {
     return !!process.env.LEONARDO_API_KEY;

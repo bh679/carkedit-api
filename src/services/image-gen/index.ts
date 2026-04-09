@@ -35,6 +35,7 @@ export function getProvider(id: string): ImageGenProvider | null {
 }
 
 export { buildPrompt } from "./buildPrompt.js";
+export { PROVIDER_PRICING } from "./pricing.js";
 export type {
   ImageGenProvider,
   GenerateRequest,

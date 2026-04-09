@@ -29,6 +29,7 @@ import type {
   ImageGenProvider,
   ProviderPricing,
 } from "../types.js";
+import { PROVIDER_PRICING } from "../pricing.js";
 
 const BFL_API_BASE = "https://api.bfl.ai/v1";
 
@@ -172,26 +173,26 @@ export const flux2Pro = createFluxProvider({
   id: "flux-2-pro",
   label: "FLUX 2 Pro",
   slug: "flux-2-pro",
-  pricing: { costPerMegapixel: 0.030, tokensPerImage: 1, pricingUrl: "https://bfl.ai/pricing" },
+  pricing: PROVIDER_PRICING["flux-2-pro"],
 });
 
 export const flux2Max = createFluxProvider({
   id: "flux-2-max",
   label: "FLUX 2 Max",
   slug: "flux-2-max",
-  pricing: { costPerMegapixel: 0.070, tokensPerImage: 1, pricingUrl: "https://bfl.ai/pricing" },
+  pricing: PROVIDER_PRICING["flux-2-max"],
 });
 
 export const flux2Klein9b = createFluxProvider({
   id: "flux-2-klein-9b",
   label: "FLUX 2 Klein 9B",
   slug: "flux-2-klein-9b",
-  pricing: { costPerMegapixel: 0.015, tokensPerImage: 1, pricingUrl: "https://bfl.ai/pricing" },
+  pricing: PROVIDER_PRICING["flux-2-klein-9b"],
 });
 
 export const flux2Klein4b = createFluxProvider({
   id: "flux-2-klein-4b",
   label: "FLUX 2 Klein 4B",
   slug: "flux-2-klein-4b",
-  pricing: { costPerMegapixel: 0.014, tokensPerImage: 1, pricingUrl: "https://bfl.ai/pricing" },
+  pricing: PROVIDER_PRICING["flux-2-klein-4b"],
 });
