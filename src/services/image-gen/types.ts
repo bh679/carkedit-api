@@ -7,6 +7,14 @@
 
 export type StyleJson = Record<string, string>;
 
+/** Callback fired by providers during polling to relay progress to the caller. */
+export type ProgressCallback = (info: {
+  /** Upstream API status string (e.g. "Pending", "Processing", "COMPLETE"). */
+  status: string;
+  /** Milliseconds since the generation request was submitted. */
+  elapsed: number;
+}) => void;
+
 export interface GenerateRequest {
   /**
    * Final prompt sent upstream. Caller assembles this via buildPrompt()
@@ -22,6 +30,8 @@ export interface GenerateRequest {
     width?: number;
     height?: number;
   };
+  /** Optional progress callback — called on every poll tick during generation. */
+  onProgress?: ProgressCallback;
 }
 
 export interface GenerateResponse {

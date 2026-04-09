@@ -28,6 +28,7 @@ import type {
   GenerateResponse,
   ImageGenProvider,
   ProviderPricing,
+  ProgressCallback,
 } from "../types.js";
 import { PROVIDER_PRICING } from "../pricing.js";
 
@@ -39,7 +40,8 @@ const POLL_TIMEOUT_MS = 90_000;
 async function pollForCompletion(
   pollingUrl: string,
   apiKey: string,
-  modelSlug: string
+  modelSlug: string,
+  onProgress?: ProgressCallback,
 ): Promise<{ imageUrl: string; meta: Record<string, any> }> {
   const started = Date.now();
   while (Date.now() - started < POLL_TIMEOUT_MS) {
@@ -58,6 +60,12 @@ async function pollForCompletion(
     }
     const data: any = await res.json();
     const status = data?.status;
+
+    // Relay poll status to the caller (SSE endpoint streams this to the client).
+    if (onProgress) {
+      try { onProgress({ status: status ?? "Unknown", elapsed: Date.now() - started }); } catch {}
+    }
+
     if (status === "Ready") {
       const url = data?.result?.sample;
       if (!url) {
@@ -69,12 +77,6 @@ async function pollForCompletion(
       };
     }
     if (status === "Request Moderated" || status === "Content Moderated") {
-      // BFL's content safety filter rejected the prompt or the
-      // generated image. Even at safety_tolerance=5 (our current
-      // request, the most permissive BFL accepts), some content
-      // still gets blocked — typically anything BFL classes as
-      // extreme or recognizable real people. Give the user an
-      // actionable hint since the red error box shows this verbatim.
       throw new Error(
         `BFL content moderation blocked this prompt (${status}). ` +
         `The FLUX adapter already asks for safety_tolerance=5 (most permissive); ` +
@@ -154,7 +156,7 @@ function createFluxProvider({
         throw new Error("FLUX create returned no polling_url");
       }
 
-      const { imageUrl, meta } = await pollForCompletion(pollingUrl, apiKey, slug);
+      const { imageUrl, meta } = await pollForCompletion(pollingUrl, apiKey, slug, req.onProgress);
 
       const megapixels = (width * height) / 1_000_000;
       return {

@@ -15,6 +15,7 @@ import type {
   GenerateRequest,
   GenerateResponse,
   ImageGenProvider,
+  ProgressCallback,
 } from "../types.js";
 import { PROVIDER_PRICING } from "../pricing.js";
 
@@ -28,7 +29,8 @@ const POLL_TIMEOUT_MS = 90_000;
 
 async function pollForCompletion(
   generationId: string,
-  apiKey: string
+  apiKey: string,
+  onProgress?: ProgressCallback,
 ): Promise<{ imageUrl: string; meta: Record<string, any> }> {
   const started = Date.now();
   while (Date.now() - started < POLL_TIMEOUT_MS) {
@@ -53,6 +55,12 @@ async function pollForCompletion(
     if (!job) {
       throw new Error("Leonardo poll returned no job data");
     }
+
+    // Relay poll status to the caller.
+    if (onProgress) {
+      try { onProgress({ status: job.status ?? "Unknown", elapsed: Date.now() - started }); } catch {}
+    }
+
     if (job.status === "COMPLETE") {
       const imgs: any[] = job.generated_images || [];
       if (imgs.length === 0 || !imgs[0].url) {
@@ -126,7 +134,7 @@ export const leonardoPhoenix1: ImageGenProvider = {
       throw new Error("Leonardo create returned no generationId");
     }
 
-    const { imageUrl, meta } = await pollForCompletion(generationId, apiKey);
+    const { imageUrl, meta } = await pollForCompletion(generationId, apiKey, req.onProgress);
 
     return {
       imageUrl,

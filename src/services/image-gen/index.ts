@@ -42,4 +42,5 @@ export type {
   GenerateResponse,
   StyleJson,
   ProviderInfo,
+  ProgressCallback,
 } from "./types.js";
