@@ -44,6 +44,8 @@ export interface ProviderPricing {
   baseCostUsd: number;
   /** Provider-specific token/credit count per image (null if N/A). */
   tokensPerImage: number | null;
+  /** URL to the provider's pricing page. */
+  pricingUrl: string;
 }
 
 export interface ImageGenProvider {

@@ -171,26 +171,26 @@ export const flux2Pro = createFluxProvider({
   id: "flux-2-pro",
   label: "FLUX 2 Pro",
   slug: "flux-2-pro",
-  pricing: { baseCostUsd: 0.05, tokensPerImage: 1 },
+  pricing: { baseCostUsd: 0.05, tokensPerImage: 1, pricingUrl: "https://docs.bfl.ml/pricing" },
 });
 
 export const flux2Max = createFluxProvider({
   id: "flux-2-max",
   label: "FLUX 2 Max",
   slug: "flux-2-max",
-  pricing: { baseCostUsd: 0.10, tokensPerImage: 1 },
+  pricing: { baseCostUsd: 0.10, tokensPerImage: 1, pricingUrl: "https://docs.bfl.ml/pricing" },
 });
 
 export const flux2Klein9b = createFluxProvider({
   id: "flux-2-klein-9b",
   label: "FLUX 2 Klein 9B",
   slug: "flux-2-klein-9b",
-  pricing: { baseCostUsd: 0.01, tokensPerImage: 1 },
+  pricing: { baseCostUsd: 0.01, tokensPerImage: 1, pricingUrl: "https://docs.bfl.ml/pricing" },
 });
 
 export const flux2Klein4b = createFluxProvider({
   id: "flux-2-klein-4b",
   label: "FLUX 2 Klein 4B",
   slug: "flux-2-klein-4b",
-  pricing: { baseCostUsd: 0.005, tokensPerImage: 1 },
+  pricing: { baseCostUsd: 0.005, tokensPerImage: 1, pricingUrl: "https://docs.bfl.ml/pricing" },
 });

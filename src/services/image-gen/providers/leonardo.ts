@@ -76,7 +76,7 @@ async function pollForCompletion(
 export const leonardoPhoenix1: ImageGenProvider = {
   id: "leonardo-phoenix-1.0",
   label: "Leonardo Phoenix 1.0",
-  pricing: { baseCostUsd: 0.02, tokensPerImage: 24 },
+  pricing: { baseCostUsd: 0.02, tokensPerImage: 24, pricingUrl: "https://leonardo.ai/pricing" },
 
   isConfigured() {
     return !!process.env.LEONARDO_API_KEY;
