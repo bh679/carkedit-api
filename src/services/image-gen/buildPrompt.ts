@@ -13,6 +13,8 @@ export interface BuildPromptInput {
   style?: StyleJson | null;
   /** For split/WYR cards: 'a' or 'b' to inject directional composition. */
   splitPosition?: 'a' | 'b' | null;
+  /** Card special type: '?' for mystery, 'Split' for WYR. */
+  cardSpecial?: string | null;
 }
 
 /**
@@ -48,7 +50,7 @@ export function humanizeKey(key: string): string {
  * object, which is stable in modern JS engines.
  */
 export function buildPrompt(input: BuildPromptInput): string {
-  const { cardText, cardPrompt, deckType, style, splitPosition } = input;
+  const { cardText, cardPrompt, deckType, style, splitPosition, cardSpecial } = input;
 
   // Extract per-deck config from the nested `decks` sub-object.
   let deckPrefix = "";
@@ -59,7 +61,10 @@ export function buildPrompt(input: BuildPromptInput): string {
     if (nested && typeof nested === "object" && deckType) {
       const cfg = nested[deckType];
       if (cfg && typeof cfg === "object") {
-        if (typeof cfg.prefix === "string" && cfg.prefix.trim()) {
+        // Mystery cards use their own prefix when available.
+        if (cardSpecial === '?' && typeof cfg.mysteryPrefix === "string" && cfg.mysteryPrefix.trim()) {
+          deckPrefix = cfg.mysteryPrefix.trim();
+        } else if (typeof cfg.prefix === "string" && cfg.prefix.trim()) {
           deckPrefix = cfg.prefix.trim();
         }
         if (typeof cfg.annotation === "string" && cfg.annotation.trim()) {

@@ -934,7 +934,7 @@ const server = defineServer({
 
     app.post("/api/carkedit/image-gen/generate", requireAdmin(), async (req: any, res: any) => {
       try {
-        const { providerId, cardText, cardPrompt, deckType, style, promptOverride, options, splitPosition, inputImage } = req.body || {};
+        const { providerId, cardText, cardPrompt, deckType, style, promptOverride, options, splitPosition, inputImage, cardSpecial } = req.body || {};
 
         if (!providerId || typeof providerId !== 'string') {
           return res.status(400).json({ error: "providerId is required" });
@@ -958,6 +958,7 @@ const server = defineServer({
               deckType: typeof deckType === 'string' ? deckType : null,
               style: (style && typeof style === 'object') ? style : null,
               splitPosition: (splitPosition === 'a' || splitPosition === 'b') ? splitPosition : null,
+              cardSpecial: typeof cardSpecial === 'string' ? cardSpecial : null,
             });
 
         if (!prompt || prompt.trim().length === 0) {
@@ -1086,7 +1087,7 @@ const server = defineServer({
       };
 
       try {
-        const { providerId, cardText, cardPrompt, deckType, style, promptOverride, options, splitPosition, inputImage } = req.body || {};
+        const { providerId, cardText, cardPrompt, deckType, style, promptOverride, options, splitPosition, inputImage, cardSpecial } = req.body || {};
 
         if (!providerId || typeof providerId !== 'string') {
           sendEvent('error', { error: 'providerId is required' });
@@ -1111,6 +1112,7 @@ const server = defineServer({
               deckType: typeof deckType === 'string' ? deckType : null,
               style: (style && typeof style === 'object') ? style : null,
               splitPosition: (splitPosition === 'a' || splitPosition === 'b') ? splitPosition : null,
+              cardSpecial: typeof cardSpecial === 'string' ? cardSpecial : null,
             });
 
         if (!prompt || prompt.trim().length === 0) {
