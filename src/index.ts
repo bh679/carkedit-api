@@ -13,6 +13,7 @@ import { createGenerationLog, listGenerationLog } from "./db/generation-log.js";
 import { optionalAuth, requireAuth, requireAdmin, setFirebaseAvailable } from "./middleware/auth.js";
 import type { GameResult, IssueReport } from "./db/types.js";
 import { listProviders, getProvider, buildPrompt } from "./services/image-gen/index.js";
+import { DEFAULT_STYLE } from "./services/image-gen/default-style.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "4500", 10);
@@ -841,40 +842,32 @@ const server = defineServer({
     });
 
     // Style JSON lives on the API filesystem — single source of truth.
-    // The checked-in default at
-    // src/services/image-gen/default-style.json is the bootstrap value.
+    // The shipped default is the `DEFAULT_STYLE` constant imported from
+    // src/services/image-gen/default-style.ts (embedded in the build
+    // output, no asset-copy step required — batch-9 shipped this as a
+    // .json file which tsc doesn't copy into dist/, so the fallback
+    // silently returned an empty object on production).
+    //
     // Runtime edits land at <api-root>/data/image-gen-style.json
     // (alongside games.db) and beat the default on subsequent GETs.
-    //
-    // The previous batch-6 route wrote to <CLIENT_DIR>/js/data/... which
-    // broke on production where the frontend's static files live under
-    // a different Apache-fronted path. Moving the source of truth here
-    // decouples the style editor from the frontend deploy layout, so
-    // the admin page works regardless of whether it's mounted at root
-    // or under a subpath like /carkedit-online/.
     const styleDataDir = path.join(__dirname, '../data');
     const runtimeStylePath = path.join(styleDataDir, 'image-gen-style.json');
-    const defaultStylePath = path.join(__dirname, 'services/image-gen/default-style.json');
 
     /**
      * GET /api/carkedit/image-gen/style
      *
-     * Returns the current style JSON, reading from runtimeStylePath if
-     * it exists (the admin has saved something) and falling back to the
-     * shipped default otherwise. Returns `{ style: {} }` with 200 if
-     * both files are missing so the admin page still mounts gracefully.
+     * Returns the current style JSON. Reads runtimeStylePath if the
+     * admin has saved something, else returns the embedded DEFAULT_STYLE.
+     * Always 200 with a non-empty `style` object — the admin page can
+     * mount cleanly regardless of whether the runtime file exists yet.
      */
     app.get("/api/carkedit/image-gen/style", requireAdmin(), (_req: any, res: any) => {
       try {
-        const candidates = [runtimeStylePath, defaultStylePath];
-        for (const p of candidates) {
-          if (fs.existsSync(p)) {
-            const raw = fs.readFileSync(p, 'utf8');
-            const style = JSON.parse(raw);
-            return res.json({ style });
-          }
+        if (fs.existsSync(runtimeStylePath)) {
+          const raw = fs.readFileSync(runtimeStylePath, 'utf8');
+          return res.json({ style: JSON.parse(raw) });
         }
-        res.json({ style: {} });
+        res.json({ style: DEFAULT_STYLE });
       } catch (err: any) {
         console.error("[CarkedIt API] Get style error:", err);
         res.status(500).json({ error: err?.message || "Failed to read style JSON" });
