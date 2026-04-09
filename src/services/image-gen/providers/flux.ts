@@ -62,12 +62,21 @@ async function pollForCompletion(
         meta: { jobId: data?.id, slug: FLUX_MODEL_SLUG },
       };
     }
-    if (
-      status === "Error" ||
-      status === "Failed" ||
-      status === "Request Moderated" ||
-      status === "Content Moderated"
-    ) {
+    if (status === "Request Moderated" || status === "Content Moderated") {
+      // BFL's content safety filter rejected the prompt or the
+      // generated image. Even at safety_tolerance=6 (our current
+      // request, the most permissive BFL accepts), some content
+      // still gets blocked — typically anything BFL classes as
+      // extreme or recognizable real people. Give the user an
+      // actionable hint since the red error box shows this verbatim.
+      throw new Error(
+        `BFL content moderation blocked this prompt (${status}). ` +
+        `The FLUX adapter already asks for safety_tolerance=6 (most permissive); ` +
+        `try rephrasing the card text — e.g. swap "Died from" framing for ` +
+        `something more oblique, or remove specific violent imagery.`
+      );
+    }
+    if (status === "Error" || status === "Failed") {
       throw new Error(`FLUX generation ${status}`);
     }
   }
@@ -96,7 +105,13 @@ export const flux2Pro: ImageGenProvider = {
       width,
       height,
       prompt_upsampling: false,
-      safety_tolerance: 2,
+      // BFL accepts 0–6 where higher = more permissive. The default
+      // 2 rejects most death-themed prompts (the whole point of this
+      // game's artwork), so we ask for 6 — BFL's most-permissive
+      // tier. It still enforces hard limits (CSAM, etc.); the
+      // moderation error path in pollForCompletion() surfaces a
+      // rephrasing hint when content is still blocked at 6.
+      safety_tolerance: 6,
       output_format: "png",
     };
 
