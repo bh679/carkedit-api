@@ -382,6 +382,7 @@ export function updateCard(packId: string, cardId: string, updates: {
   prompt?: string | null;
   card_special?: string | null;
   options_json?: string | null;
+  image_url?: string | null;
 }): ExpansionCard | null {
   const db = getDb();
 
@@ -399,6 +400,7 @@ export function updateCard(packId: string, cardId: string, updates: {
   if (updates.prompt !== undefined) { sets.push('prompt = ?'); params.push(updates.prompt); }
   if (updates.card_special !== undefined) { sets.push('card_special = ?'); params.push(updates.card_special); }
   if (updates.options_json !== undefined) { sets.push('options_json = ?'); params.push(updates.options_json); }
+  if (updates.image_url !== undefined) { sets.push('image_url = ?'); params.push(updates.image_url); }
 
   if (sets.length === 0) return card;
 

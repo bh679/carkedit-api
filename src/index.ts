@@ -9,8 +9,10 @@ import { GameRoom } from "./rooms/GameRoom.js";
 import { initDatabase, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag } from "./db/users.js";
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, getPackStats, listPackStatsAll } from "./db/packs.js";
+import { createGenerationLog, listGenerationLog } from "./db/generation-log.js";
 import { optionalAuth, requireAuth, requireAdmin, setFirebaseAvailable } from "./middleware/auth.js";
 import type { GameResult, IssueReport } from "./db/types.js";
+import { listProviders, getProvider, buildPrompt } from "./services/image-gen/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "4500", 10);
@@ -51,10 +53,12 @@ const server = defineServer({
 
     app.use(express.static(clientDir, { extensions: ['html'] }));
 
-    // Serve uploaded brand images
+    // Serve uploaded brand images and card illustrations
     const uploadsDir = path.join(__dirname, '../uploads');
     const brandsDir = path.join(uploadsDir, 'brands');
+    const cardImagesDir = path.join(uploadsDir, 'card-images');
     fs.mkdirSync(brandsDir, { recursive: true });
+    fs.mkdirSync(cardImagesDir, { recursive: true });
     app.use('/uploads', express.static(uploadsDir));
 
     // PNG / WebP / SVG — all support transparency. JPEG excluded.
@@ -76,9 +80,10 @@ const server = defineServer({
       },
     });
 
-    // Apply optional auth to pack and user routes
+    // Apply optional auth to pack, user, and image-gen routes
     app.use('/api/carkedit/packs', optionalAuth());
     app.use('/api/carkedit/users', optionalAuth());
+    app.use('/api/carkedit/image-gen', optionalAuth());
 
     app.get("/api/carkedit/health", (_req: any, res: any) => {
       res.json({ status: "ok", timestamp: new Date().toISOString() });
@@ -819,6 +824,287 @@ const server = defineServer({
         res.status(500).json({ error: "Failed to delete card" });
       }
     });
+
+    // --- Image generation (test admin page) ---
+    //
+    // All routes are admin-only. These back the admin-image-gen.html page that
+    // the art team uses to test AI image generators against a structured
+    // style JSON. See carkedit-online/js/admin-image-gen/ for the client.
+
+    app.get("/api/carkedit/image-gen/providers", requireAdmin(), (_req: any, res: any) => {
+      try {
+        res.json({ providers: listProviders() });
+      } catch (err) {
+        console.error("[CarkedIt API] List providers error:", err);
+        res.status(500).json({ error: "Failed to list providers" });
+      }
+    });
+
+    /**
+     * POST /api/carkedit/image-gen/style
+     *
+     * Persist the admin page's style editor contents back to the shipped
+     * default file at `<CLIENT_DIR>/js/data/image-gen-style.json`. The
+     * file path is hardcoded relative to `clientDir`, so no part of the
+     * request body influences where the write lands — safe from
+     * directory traversal. The client sends `{ style: <object> }`; the
+     * server validates it's a non-array plain object and pretty-prints
+     * with 2-space indent + trailing newline (matching how we author
+     * the file by hand).
+     */
+    app.post("/api/carkedit/image-gen/style", requireAdmin(), (req: any, res: any) => {
+      try {
+        const { style } = req.body || {};
+        if (!style || typeof style !== 'object' || Array.isArray(style)) {
+          return res.status(400).json({ error: "style must be a plain object" });
+        }
+        const STYLE_REL_PATH = 'js/data/image-gen-style.json';
+        const stylePath = path.join(clientDir, STYLE_REL_PATH);
+        // Guard against clientDir misconfig pointing somewhere weird.
+        const resolved = path.resolve(stylePath);
+        const clientResolved = path.resolve(clientDir);
+        if (!resolved.startsWith(clientResolved + path.sep)) {
+          return res.status(500).json({ error: "Refusing to write outside CLIENT_DIR" });
+        }
+        const jsonText = JSON.stringify(style, null, 2) + '\n';
+        fs.mkdirSync(path.dirname(resolved), { recursive: true });
+        fs.writeFileSync(resolved, jsonText, 'utf8');
+        res.json({ ok: true, bytes: Buffer.byteLength(jsonText, 'utf8'), path: '/' + STYLE_REL_PATH });
+      } catch (err: any) {
+        console.error("[CarkedIt API] Save style error:", err);
+        res.status(500).json({ error: err?.message || "Failed to save style JSON" });
+      }
+    });
+
+    app.get("/api/carkedit/image-gen/log", requireAdmin(), (req: any, res: any) => {
+      try {
+        const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '50'), 10) || 50, 1), 200);
+        const offset = Math.max(parseInt(String(req.query.offset ?? '0'), 10) || 0, 0);
+        const scope = String(req.query.scope ?? 'all');
+        let creator_id: string | undefined;
+        if (scope === 'mine') {
+          creator_id = req.localUser?.id;
+          if (!creator_id) return res.json({ entries: [] });
+        }
+        // 'all' and 'admins' both pass through without a creator_id filter —
+        // until we let non-admins write to the log they're equivalent, but
+        // keeping both as accepted values future-proofs the UI.
+        const entries = listGenerationLog({ creator_id, limit, offset });
+        res.json({ entries });
+      } catch (err: any) {
+        console.error("[CarkedIt API] list generation log error:", err);
+        res.status(500).json({ error: err?.message || "Failed to list generation log" });
+      }
+    });
+
+    app.post("/api/carkedit/image-gen/generate", requireAdmin(), async (req: any, res: any) => {
+      try {
+        const { providerId, cardText, cardPrompt, deckType, style, promptOverride, options } = req.body || {};
+
+        if (!providerId || typeof providerId !== 'string') {
+          return res.status(400).json({ error: "providerId is required" });
+        }
+        const provider = getProvider(providerId);
+        if (!provider) {
+          return res.status(400).json({ error: `Unknown provider: ${providerId}` });
+        }
+        if (!provider.isConfigured()) {
+          return res.status(503).json({
+            error: `Provider ${providerId} is not configured (missing API key)`,
+          });
+        }
+
+        const overrideIsSet = typeof promptOverride === 'string' && promptOverride.trim().length > 0;
+        const prompt = overrideIsSet
+          ? promptOverride.trim()
+          : buildPrompt({
+              cardText: typeof cardText === 'string' ? cardText : '',
+              cardPrompt: typeof cardPrompt === 'string' ? cardPrompt : null,
+              deckType: typeof deckType === 'string' ? deckType : null,
+              style: (style && typeof style === 'object') ? style : null,
+            });
+
+        if (!prompt || prompt.trim().length === 0) {
+          return res.status(400).json({ error: "Resolved prompt is empty — provide cardText or promptOverride" });
+        }
+
+        const result = await provider.generate({
+          prompt,
+          style: (style && typeof style === 'object') ? style : undefined,
+          options: (options && typeof options === 'object') ? options : undefined,
+        });
+
+        // --- Auto-save the generated image + card context ---
+        //
+        // Download the provider URL immediately (signed URLs can expire in
+        // minutes), write to /uploads/card-images/, and record a row in
+        // generation_log. Return the LOCAL URL to the client so the preview
+        // shows the persistent image (not the expiring provider URL).
+        //
+        // If this step fails *after* the provider succeeded, we still
+        // return the provider URL to the client so the user isn't billed
+        // for nothing — but we log the error so persistence issues are
+        // visible in the server logs.
+        let localImageUrl = result.imageUrl;
+        let logId: string | null = null;
+        let logWarning: string | null = null;
+        try {
+          const fetchRes = await fetch(result.imageUrl);
+          if (!fetchRes.ok) {
+            throw new Error(`provider download ${fetchRes.status}`);
+          }
+          const contentType = (fetchRes.headers.get('content-type') || '').toLowerCase();
+          const extMap: Record<string, string> = {
+            'image/png': '.png',
+            'image/webp': '.webp',
+            'image/jpeg': '.jpg',
+            'image/jpg': '.jpg',
+            'image/gif': '.gif',
+          };
+          let ext = extMap[contentType] || '';
+          if (!ext) {
+            try {
+              const parsed = new URL(result.imageUrl);
+              const pathExt = path.extname(parsed.pathname).toLowerCase();
+              if (['.png', '.webp', '.jpg', '.jpeg', '.gif'].includes(pathExt)) {
+                ext = pathExt === '.jpeg' ? '.jpg' : pathExt;
+              }
+            } catch {}
+          }
+          if (!ext) ext = '.png';
+
+          const buffer = Buffer.from(await fetchRes.arrayBuffer());
+          const MAX_BYTES = 15 * 1024 * 1024;
+          if (buffer.length > MAX_BYTES) {
+            throw new Error("image too large (>15MB)");
+          }
+          const filename = `gen-${randomUUID()}-${Date.now()}${ext}`;
+          const filepath = path.join(cardImagesDir, filename);
+          fs.writeFileSync(filepath, buffer);
+          localImageUrl = `/uploads/card-images/${filename}`;
+
+          // Normalise Split options to a JSON string if provided
+          const cardSpecialStr = normalizeCardSpecial(req.body?.card_special ?? null);
+          const optionsArrRaw = req.body?.options;
+          const optionsJson = Array.isArray(optionsArrRaw) && optionsArrRaw.length > 0
+            ? JSON.stringify(optionsArrRaw)
+            : null;
+
+          const logRow = createGenerationLog({
+            creator_id: req.localUser?.id ?? null,
+            deck_type: typeof deckType === 'string' ? deckType : 'die',
+            text: typeof cardText === 'string' ? cardText : '',
+            prompt: typeof cardPrompt === 'string' && cardPrompt.trim() ? cardPrompt.trim() : null,
+            card_special: cardSpecialStr,
+            options_json: optionsJson,
+            image_url: localImageUrl,
+            provider: result.provider,
+            prompt_sent: result.promptSent,
+          });
+          logId = logRow.id;
+        } catch (err: any) {
+          console.error("[CarkedIt API] auto-save generation failed:", err);
+          logWarning = err?.message || 'auto-save failed';
+        }
+
+        res.json({
+          ...result,
+          imageUrl: localImageUrl,
+          logId,
+          logWarning,
+        });
+      } catch (err: any) {
+        console.error("[CarkedIt API] image-gen generate error:", err);
+        res.status(502).json({ error: err?.message || "Image generation failed" });
+      }
+    });
+
+    /**
+     * Download a remote image (typically a provider-hosted URL returned by
+     * /api/carkedit/image-gen/generate) into uploads/card-images/ and persist
+     * it to the target card's image_url column.
+     *
+     * Why this isn't a multipart upload: provider URLs are one-shot signed
+     * URLs that expire quickly — round-tripping them through the browser as
+     * a file upload would be slower and more brittle than letting the server
+     * fetch them directly.
+     */
+    app.post(
+      "/api/carkedit/packs/:id/cards/:cardId/image-from-url",
+      requireAdmin(),
+      async (req: any, res: any) => {
+        try {
+          const { imageUrl } = req.body || {};
+          if (!imageUrl || typeof imageUrl !== 'string') {
+            return res.status(400).json({ error: "imageUrl is required" });
+          }
+          // Guard against non-http(s) schemes (file://, data:, javascript:, etc).
+          let parsed: URL;
+          try {
+            parsed = new URL(imageUrl);
+          } catch {
+            return res.status(400).json({ error: "imageUrl is not a valid URL" });
+          }
+          if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+            return res.status(400).json({ error: "imageUrl must use http(s)" });
+          }
+
+          const pack = getPackById(req.params.id);
+          if (!pack) return res.status(404).json({ error: "Pack not found" });
+
+          const fetchRes = await fetch(imageUrl);
+          if (!fetchRes.ok) {
+            return res.status(502).json({
+              error: `Failed to download image (${fetchRes.status})`,
+            });
+          }
+          const contentType = (fetchRes.headers.get('content-type') || '').toLowerCase();
+          const extMap: Record<string, string> = {
+            'image/png': '.png',
+            'image/webp': '.webp',
+            'image/jpeg': '.jpg',
+            'image/jpg': '.jpg',
+            'image/gif': '.gif',
+            'image/svg+xml': '.svg',
+          };
+          let ext = extMap[contentType] || '';
+          if (!ext) {
+            const pathExt = path.extname(parsed.pathname).toLowerCase();
+            if (['.png', '.webp', '.jpg', '.jpeg', '.gif', '.svg'].includes(pathExt)) {
+              ext = pathExt === '.jpeg' ? '.jpg' : pathExt;
+            }
+          }
+          if (!ext) ext = '.png';
+
+          const buffer = Buffer.from(await fetchRes.arrayBuffer());
+          // 10 MB ceiling — generous for 1024x1024 PNGs but keeps the
+          // abuse surface narrow.
+          const MAX_BYTES = 10 * 1024 * 1024;
+          if (buffer.length > MAX_BYTES) {
+            return res.status(413).json({ error: "Image too large (>10MB)" });
+          }
+
+          const filename = `card-${req.params.id}-${req.params.cardId}-${Date.now()}${ext}`;
+          const filepath = path.join(cardImagesDir, filename);
+          fs.writeFileSync(filepath, buffer);
+
+          // Best-effort cleanup of the previous image for this card.
+          const relUrl = `/uploads/card-images/${filename}`;
+          const updated = updateCard(req.params.id, req.params.cardId, {
+            image_url: relUrl,
+          });
+          if (!updated) {
+            // Card vanished between auth and write — roll back the file.
+            fs.unlink(filepath, () => {});
+            return res.status(404).json({ error: "Card not found" });
+          }
+          res.json(updated);
+        } catch (err: any) {
+          console.error("[CarkedIt API] image-from-url error:", err);
+          res.status(500).json({ error: err?.message || "Failed to save image" });
+        }
+      }
+    );
   },
 });
 
