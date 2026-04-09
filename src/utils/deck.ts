@@ -24,6 +24,8 @@ export function createDeck(cards: CardData[], deckType: string): Card[] {
     if (data.packId) card.packId = data.packId;
     if (data.prompt) card.prompt = data.prompt;
     if (data.image_url) card.image_url = data.image_url;
+    if (data.text_position) card.text_position = data.text_position;
+    if (data.text_color) card.text_color = data.text_color;
     if (Array.isArray(data.options) && data.options.length > 0) {
       card.options = new ArraySchema<string>(...data.options);
     }
@@ -65,6 +67,8 @@ export function expansionCardsToCardData(cards: ExpansionCard[]): {
       special: c.card_special ?? undefined,
       options: parsedOptions,
       image_url: c.image_url ?? null,
+      text_position: c.text_position ?? null,
+      text_color: c.text_color ?? null,
     });
   }
   return result;

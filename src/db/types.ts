@@ -176,6 +176,8 @@ export interface ExpansionCard {
   card_special: string | null;
   options_json: string | null;
   image_url: string | null;
+  text_position: string | null;
+  text_color: string | null;
   sort_order: number;
   created_at: string;
   updated_at: string;

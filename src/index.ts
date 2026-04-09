@@ -774,6 +774,8 @@ const server = defineServer({
           options_json: c.card_special === 'Split' && Array.isArray(c.options)
             ? JSON.stringify(c.options.map((o: string) => o.trim()))
             : null,
+          text_position: c.deck_type === 'die' ? (c.text_position || 'top') : null,
+          text_color: c.deck_type === 'die' ? (c.text_color || 'black') : null,
         })));
         res.status(201).json({ cards: created });
       } catch (err: any) {
@@ -814,6 +816,8 @@ const server = defineServer({
             ? JSON.stringify(body.options.map((o: string) => String(o).trim()))
             : null;
         }
+        if (body.text_position !== undefined) updates.text_position = body.text_position;
+        if (body.text_color !== undefined) updates.text_color = body.text_color;
         const card = updateCard(req.params.id, req.params.cardId, updates);
         if (!card) return res.status(404).json({ error: "Card not found" });
         res.json(card);
@@ -1240,7 +1244,7 @@ const server = defineServer({
       requireAdmin(),
       async (req: any, res: any) => {
         try {
-          const { imageUrl } = req.body || {};
+          const { imageUrl, text_position, text_color } = req.body || {};
           if (!imageUrl || typeof imageUrl !== 'string') {
             return res.status(400).json({ error: "imageUrl is required" });
           }
@@ -1298,9 +1302,10 @@ const server = defineServer({
           // Served via `app.use('/api/carkedit/uploads', …)` so the URL
           // flows through brennan.games's /api/carkedit/* Apache proxy.
           const relUrl = `/api/carkedit/uploads/card-images/${filename}`;
-          const updated = updateCard(req.params.id, req.params.cardId, {
-            image_url: relUrl,
-          });
+          const updates: any = { image_url: relUrl };
+          if (text_position) updates.text_position = text_position;
+          if (text_color) updates.text_color = text_color;
+          const updated = updateCard(req.params.id, req.params.cardId, updates);
           if (!updated) {
             // Card vanished between auth and write — roll back the file.
             fs.unlink(filepath, () => {});

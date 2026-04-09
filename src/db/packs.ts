@@ -334,7 +334,7 @@ export function deletePack(id: string): boolean {
 
 // --- Cards ---
 
-export function addCards(packId: string, cards: { deck_type: string; text: string; prompt?: string | null; card_special?: string | null; options_json?: string | null }[]): ExpansionCard[] {
+export function addCards(packId: string, cards: { deck_type: string; text: string; prompt?: string | null; card_special?: string | null; options_json?: string | null; text_position?: string | null; text_color?: string | null }[]): ExpansionCard[] {
   const db = getDb();
 
   // Verify pack exists
@@ -347,8 +347,8 @@ export function addCards(packId: string, cards: { deck_type: string; text: strin
   ).get(packId) as { max_sort: number }).max_sort;
 
   const insert = db.prepare(`
-    INSERT INTO expansion_cards (id, pack_id, deck_type, text, prompt, card_special, options_json, sort_order)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO expansion_cards (id, pack_id, deck_type, text, prompt, card_special, options_json, sort_order, text_position, text_color)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const createdIds: string[] = [];
@@ -362,6 +362,8 @@ export function addCards(packId: string, cards: { deck_type: string; text: strin
         cards[i].card_special ?? null,
         cards[i].options_json ?? null,
         maxSort + 1 + i,
+        cards[i].text_position ?? 'top',
+        cards[i].text_color ?? 'black',
       );
       createdIds.push(id);
     }
@@ -383,6 +385,8 @@ export function updateCard(packId: string, cardId: string, updates: {
   card_special?: string | null;
   options_json?: string | null;
   image_url?: string | null;
+  text_position?: string | null;
+  text_color?: string | null;
 }): ExpansionCard | null {
   const db = getDb();
 
@@ -401,6 +405,8 @@ export function updateCard(packId: string, cardId: string, updates: {
   if (updates.card_special !== undefined) { sets.push('card_special = ?'); params.push(updates.card_special); }
   if (updates.options_json !== undefined) { sets.push('options_json = ?'); params.push(updates.options_json); }
   if (updates.image_url !== undefined) { sets.push('image_url = ?'); params.push(updates.image_url); }
+  if (updates.text_position !== undefined) { sets.push('text_position = ?'); params.push(updates.text_position); }
+  if (updates.text_color !== undefined) { sets.push('text_color = ?'); params.push(updates.text_color); }
 
   if (sets.length === 0) return card;
 
