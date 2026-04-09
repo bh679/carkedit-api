@@ -867,19 +867,35 @@ const server = defineServer({
     const styleDataDir = path.join(__dirname, '../data');
     const runtimeStylePath = path.join(styleDataDir, 'image-gen-style.json');
 
+    /** Deep-merge defaults into saved style so new keys are always present. */
+    function deepMergeStyle(defaults: any, saved: any): any {
+      if (!defaults || typeof defaults !== 'object' || Array.isArray(defaults)) return saved;
+      if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return saved;
+      const result: any = { ...defaults };
+      for (const key of Object.keys(saved)) {
+        if (key in result && typeof result[key] === 'object' && !Array.isArray(result[key])
+            && typeof saved[key] === 'object' && !Array.isArray(saved[key])) {
+          result[key] = deepMergeStyle(result[key], saved[key]);
+        } else {
+          result[key] = saved[key];
+        }
+      }
+      return result;
+    }
+
     /**
      * GET /api/carkedit/image-gen/style
      *
      * Returns the current style JSON. Reads runtimeStylePath if the
-     * admin has saved something, else returns the embedded DEFAULT_STYLE.
-     * Always 200 with a non-empty `style` object — the admin page can
-     * mount cleanly regardless of whether the runtime file exists yet.
+     * admin has saved something, deep-merged with DEFAULT_STYLE so new
+     * keys (e.g. mysteryPrefix) are always present. Saved values win.
      */
     app.get("/api/carkedit/image-gen/style", requireAdmin(), (_req: any, res: any) => {
       try {
         if (fs.existsSync(runtimeStylePath)) {
           const raw = fs.readFileSync(runtimeStylePath, 'utf8');
-          return res.json({ style: JSON.parse(raw) });
+          const saved = JSON.parse(raw);
+          return res.json({ style: deepMergeStyle(DEFAULT_STYLE, saved) });
         }
         res.json({ style: DEFAULT_STYLE });
       } catch (err: any) {
