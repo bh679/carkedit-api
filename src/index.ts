@@ -1056,6 +1056,140 @@ const server = defineServer({
       }
     });
 
+    // --- SSE streaming variant of /generate ---
+    //
+    // Streams real-time progress events during the provider's polling loop
+    // so the admin page can show a live progress bar and status text.
+    // Uses Server-Sent Events (text/event-stream).
+    //
+    // Events:
+    //   event: progress  — { phase, status, elapsed }
+    //   event: complete   — full result JSON (same shape as /generate response)
+    //   event: error      — { error: "..." }
+
+    app.post("/api/carkedit/image-gen/generate-stream", requireAdmin(), async (req: any, res: any) => {
+      // SSE headers — keep-alive, no buffering.
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no', // nginx
+      });
+
+      const sendEvent = (event: string, data: any) => {
+        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      };
+
+      try {
+        const { providerId, cardText, cardPrompt, deckType, style, promptOverride, options, splitPosition } = req.body || {};
+
+        if (!providerId || typeof providerId !== 'string') {
+          sendEvent('error', { error: 'providerId is required' });
+          return res.end();
+        }
+        const provider = getProvider(providerId);
+        if (!provider) {
+          sendEvent('error', { error: `Unknown provider: ${providerId}` });
+          return res.end();
+        }
+        if (!provider.isConfigured()) {
+          sendEvent('error', { error: `Provider ${providerId} is not configured (missing API key)` });
+          return res.end();
+        }
+
+        const overrideIsSet = typeof promptOverride === 'string' && promptOverride.trim().length > 0;
+        const prompt = overrideIsSet
+          ? promptOverride.trim()
+          : buildPrompt({
+              cardText: typeof cardText === 'string' ? cardText : '',
+              cardPrompt: typeof cardPrompt === 'string' ? cardPrompt : null,
+              deckType: typeof deckType === 'string' ? deckType : null,
+              style: (style && typeof style === 'object') ? style : null,
+              splitPosition: (splitPosition === 'a' || splitPosition === 'b') ? splitPosition : null,
+            });
+
+        if (!prompt || prompt.trim().length === 0) {
+          sendEvent('error', { error: 'Resolved prompt is empty — provide cardText or promptOverride' });
+          return res.end();
+        }
+
+        sendEvent('progress', { phase: 'submitted', status: 'Submitted', elapsed: 0 });
+
+        const result = await provider.generate({
+          prompt,
+          style: (style && typeof style === 'object') ? style : undefined,
+          options: (options && typeof options === 'object') ? options : undefined,
+          onProgress: (info) => {
+            sendEvent('progress', { phase: 'polling', ...info });
+          },
+        });
+
+        // --- Auto-save (same logic as the non-streaming /generate route) ---
+        sendEvent('progress', { phase: 'saving', status: 'Downloading image', elapsed: 0 });
+
+        let localImageUrl = result.imageUrl;
+        let logId: string | null = null;
+        let logWarning: string | null = null;
+        try {
+          const fetchRes = await fetch(result.imageUrl);
+          if (!fetchRes.ok) throw new Error(`provider download ${fetchRes.status}`);
+          const contentType = (fetchRes.headers.get('content-type') || '').toLowerCase();
+          const extMap: Record<string, string> = {
+            'image/png': '.png', 'image/webp': '.webp',
+            'image/jpeg': '.jpg', 'image/jpg': '.jpg', 'image/gif': '.gif',
+          };
+          let ext = extMap[contentType] || '';
+          if (!ext) {
+            try {
+              const parsed = new URL(result.imageUrl);
+              const pathExt = path.extname(parsed.pathname).toLowerCase();
+              if (['.png', '.webp', '.jpg', '.jpeg', '.gif'].includes(pathExt)) {
+                ext = pathExt === '.jpeg' ? '.jpg' : pathExt;
+              }
+            } catch {}
+          }
+          if (!ext) ext = '.png';
+          const buffer = Buffer.from(await fetchRes.arrayBuffer());
+          if (buffer.length > 15 * 1024 * 1024) throw new Error("image too large (>15MB)");
+          const filename = `gen-${randomUUID()}-${Date.now()}${ext}`;
+          fs.writeFileSync(path.join(cardImagesDir, filename), buffer);
+          localImageUrl = `/api/carkedit/uploads/card-images/${filename}`;
+
+          const cardSpecialStr = normalizeCardSpecial(req.body?.card_special ?? null);
+          const optionsArrRaw = req.body?.options;
+          const optionsJson = Array.isArray(optionsArrRaw) && optionsArrRaw.length > 0
+            ? JSON.stringify(optionsArrRaw) : null;
+          const logRow = createGenerationLog({
+            creator_id: req.localUser?.id ?? null,
+            deck_type: typeof deckType === 'string' ? deckType : 'die',
+            text: typeof cardText === 'string' ? cardText : '',
+            prompt: typeof cardPrompt === 'string' && cardPrompt.trim() ? cardPrompt.trim() : null,
+            card_special: cardSpecialStr,
+            options_json: optionsJson,
+            image_url: localImageUrl,
+            provider: result.provider,
+            prompt_sent: result.promptSent,
+          });
+          logId = logRow.id;
+        } catch (err: any) {
+          console.error("[CarkedIt API] auto-save generation (stream) failed:", err);
+          logWarning = err?.message || 'auto-save failed';
+        }
+
+        sendEvent('complete', {
+          ...result,
+          imageUrl: localImageUrl,
+          logId,
+          logWarning,
+        });
+      } catch (err: any) {
+        console.error("[CarkedIt API] image-gen generate-stream error:", err);
+        sendEvent('error', { error: err?.message || 'Image generation failed' });
+      } finally {
+        res.end();
+      }
+    });
+
     /**
      * Download a remote image (typically a provider-hosted URL returned by
      * /api/carkedit/image-gen/generate) into uploads/card-images/ and persist
