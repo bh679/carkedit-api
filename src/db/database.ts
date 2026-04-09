@@ -282,6 +282,12 @@ export function initDatabase(): void {
   if (!cardCols.includes('image_url')) {
     db.exec('ALTER TABLE expansion_cards ADD COLUMN image_url TEXT');
   }
+  if (!cardCols.includes('text_position')) {
+    db.exec("ALTER TABLE expansion_cards ADD COLUMN text_position TEXT DEFAULT 'top'");
+  }
+  if (!cardCols.includes('text_color')) {
+    db.exec("ALTER TABLE expansion_cards ADD COLUMN text_color TEXT DEFAULT 'black'");
+  }
 
   if (!packCols.includes('featured_card_id')) {
     // No FK on ALTER (SQLite limitation); deletion cleanup is enforced in deleteCard().

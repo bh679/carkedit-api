@@ -774,6 +774,8 @@ const server = defineServer({
           options_json: c.card_special === 'Split' && Array.isArray(c.options)
             ? JSON.stringify(c.options.map((o: string) => o.trim()))
             : null,
+          text_position: c.deck_type === 'die' ? (c.text_position || 'top') : null,
+          text_color: c.deck_type === 'die' ? (c.text_color || 'black') : null,
         })));
         res.status(201).json({ cards: created });
       } catch (err: any) {
@@ -814,6 +816,8 @@ const server = defineServer({
             ? JSON.stringify(body.options.map((o: string) => String(o).trim()))
             : null;
         }
+        if (body.text_position !== undefined) updates.text_position = body.text_position;
+        if (body.text_color !== undefined) updates.text_color = body.text_color;
         const card = updateCard(req.params.id, req.params.cardId, updates);
         if (!card) return res.status(404).json({ error: "Card not found" });
         res.json(card);
