@@ -1,0 +1,31 @@
+name: Deploy to api.carkedit.com (production)
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger deploy webhook on api.carkedit.com
+        env:
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN_PROD }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          echo "Deploying tag: $REF_NAME"
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            --data-urlencode "token=$DEPLOY_TOKEN" \
+            --data-urlencode "ref=$REF_NAME" \
+            -G "https://api.carkedit.com/.deploy/carkedit-api.php")
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+          echo "HTTP Status: $HTTP_CODE"
+          echo "Response: $BODY"
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Deploy failed with HTTP $HTTP_CODE"
+            exit 1
+          fi
+          echo "$BODY" | grep -q '"status":"ok"' || { echo "::error::Deploy status not ok"; exit 1; }
+          echo "Production deploy successful!"
