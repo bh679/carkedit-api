@@ -431,9 +431,11 @@ const server = defineServer({
       }
     });
 
-    app.post("/api/carkedit/users", (req: any, res: any) => {
+    app.post("/api/carkedit/users", requireAuth(), (req: any, res: any) => {
       try {
-        const { display_name, firebase_uid, email, avatar_url, birth_month, birth_day } = req.body;
+        const { display_name, avatar_url, birth_month, birth_day } = req.body;
+        const firebase_uid = req.firebaseUser!.uid;
+        const email = req.body.email || req.firebaseUser!.email;
         if (!display_name || typeof display_name !== 'string' || display_name.trim().length === 0) {
           return res.status(400).json({ error: "display_name is required" });
         }
