@@ -2,16 +2,16 @@ name: Deploy to Production
 
 on:
   push:
-    branches: [main]
+    branches: ['**']
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger production deploy (server)
+      - name: Trigger staging deploy (server)
         run: |
           RESPONSE=$(curl -s -w "\n%{http_code}" \
-            "https://brennan.games/deploy-carkedit-api.php?token=${{ secrets.DEPLOY_TOKEN }}")
+            "https://brennan.games/deploy-carkedit-api.php?token=${{ secrets.DEPLOY_TOKEN }}&branch=${{ github.ref_name }}")
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
           BODY=$(echo "$RESPONSE" | head -n -1)
           echo "Response: $BODY"
@@ -20,5 +20,12 @@ jobs:
             echo "::error::Deploy failed with HTTP $HTTP_CODE"
             exit 1
           fi
-          echo "$BODY" | jq -r '.status' | grep -q "ok" || { echo "::error::Deploy status not ok"; exit 1; }
-          echo "Server deploy successful!"
+          STATUS=$(echo "$BODY" | jq -r '.status')
+          if [ "$STATUS" = "skipped" ]; then
+            echo "Deploy skipped: $(echo "$BODY" | jq -r '.message')"
+          elif [ "$STATUS" = "ok" ]; then
+            echo "Server deploy successful!"
+          else
+            echo "::error::Deploy status: $STATUS"
+            exit 1
+          fi
