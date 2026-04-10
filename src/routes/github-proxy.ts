@@ -45,9 +45,24 @@ router.get("/repos/:owner/:repo/commits/:sha", async (req, res) => {
 router.get("/repos/:owner/:repo/stats/commit_activity", async (req, res) => {
   try {
     const { owner, repo } = req.params;
-    const ghRes = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/stats/commit_activity`, { headers: ghHeaders() });
+    const url = `${GITHUB_API}/repos/${owner}/${repo}/stats/commit_activity`;
+    let ghRes = await fetch(url, { headers: ghHeaders() });
+
+    // GitHub returns 202 while computing stats — retry server-side
+    for (let i = 0; i < 4 && ghRes.status === 202; i++) {
+      await new Promise(r => setTimeout(r, 2000 * (i + 1)));
+      ghRes = await fetch(url, { headers: ghHeaders() });
+    }
+
     forwardRateLimit(ghRes, res);
-    res.status(ghRes.status).json(await ghRes.json());
+
+    // If still 202 after retries, return empty array so client doesn't loop
+    if (ghRes.status === 202) {
+      return res.status(200).json([]);
+    }
+
+    const data = await ghRes.json().catch(() => []);
+    res.status(ghRes.status).json(data);
   } catch (err) {
     res.status(502).json({ error: "GitHub proxy error" });
   }
