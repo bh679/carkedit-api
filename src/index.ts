@@ -4,6 +4,7 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import express from "express";
 import multer from "multer";
+import helmet from "helmet";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
 import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev } from "./db/database.js";
@@ -11,6 +12,7 @@ import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, getPackStats, listPackStatsAll } from "./db/packs.js";
 import { createGenerationLog, listGenerationLog, mergeLogEntries } from "./db/generation-log.js";
 import { optionalAuth, requireAuth, requireAdmin, setFirebaseAvailable } from "./middleware/auth.js";
+import { publicWriteLimiter, publicBodyLimit, globalLimiter } from "./middleware/rate-limit.js";
 import type { GameResult, IssueReport } from "./db/types.js";
 import { listProviders, getProvider, buildPrompt } from "./services/image-gen/index.js";
 import { DEFAULT_STYLE } from "./services/image-gen/default-style.js";
@@ -46,6 +48,22 @@ const server = defineServer({
     // Increased limit to 10MB to support base64-encoded reference images
     // in image-editing requests (e.g. mystery card question mark).
     app.use(express.json({ limit: '10mb' }));
+
+    // HTTP security headers (CSP, HSTS, X-Frame-Options, etc.)
+    app.use(helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'", "https://unpkg.com"],
+          styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+          fontSrc: ["'self'", "https://fonts.gstatic.com"],
+          imgSrc: ["'self'", "data:", "blob:"],
+          connectSrc: ["'self'", "wss:", "ws:"],
+        },
+      },
+      hsts: { maxAge: 31536000, includeSubDomains: true },
+      frameguard: { action: "deny" },
+    }));
 
     // Force browsers to revalidate HTML pages (picks up new versioned asset URLs)
     app.use((req, res, next) => {
@@ -92,6 +110,9 @@ const server = defineServer({
       },
     });
 
+    // Rate limiting — global catch-all for all API routes
+    app.use('/api/carkedit', globalLimiter);
+
     // Apply optional auth to pack, user, and image-gen routes
     app.use('/api/carkedit/packs', optionalAuth());
     app.use('/api/carkedit/users', optionalAuth());
@@ -130,7 +151,7 @@ const server = defineServer({
     });
 
     // Game history endpoints
-    app.post("/api/carkedit/games", (req: any, res: any) => {
+    app.post("/api/carkedit/games", publicWriteLimiter, publicBodyLimit, (req: any, res: any) => {
       try {
         const { mode, rounds, players, settings, finishedAt, startedAt, hostName, status, clientVersion, isDev } = req.body;
         if (!players || !Array.isArray(players) || players.length === 0) {
@@ -279,7 +300,7 @@ const server = defineServer({
     });
 
     // Issue reporting endpoints
-    app.post("/api/carkedit/issues", (req: any, res: any) => {
+    app.post("/api/carkedit/issues", publicWriteLimiter, publicBodyLimit, (req: any, res: any) => {
       try {
         const { category, description, game_mode, screen, phase, room_code,
                 player_count, players_json, game_state_json, device_info,
@@ -327,7 +348,7 @@ const server = defineServer({
 
     // --- Survey endpoints ---
 
-    app.post("/api/carkedit/surveys", (req: any, res: any) => {
+    app.post("/api/carkedit/surveys", publicWriteLimiter, publicBodyLimit, (req: any, res: any) => {
       try {
         const { game_id, player_name, session_id, nps_score, comment, improvement, client_version, is_dev } = req.body;
 
