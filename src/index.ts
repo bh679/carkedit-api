@@ -53,11 +53,13 @@ const server = defineServer({
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'self'"],
-          scriptSrc: ["'self'", "'unsafe-inline'", "https://unpkg.com"],
+          scriptSrc: ["'self'", "'unsafe-inline'", "https://unpkg.com", "https://www.gstatic.com", "https://apis.google.com"],
+          scriptSrcAttr: ["'unsafe-inline'"],
           styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
           fontSrc: ["'self'", "https://fonts.gstatic.com"],
-          imgSrc: ["'self'", "data:", "blob:"],
-          connectSrc: ["'self'", "wss:", "ws:"],
+          imgSrc: ["'self'", "data:", "blob:", "https://*.googleusercontent.com"],
+          connectSrc: ["'self'", "wss:", "ws:", "https://*.googleapis.com", "https://*.firebaseapp.com", "https://www.gstatic.com"],
+          frameSrc: ["'self'", "https://*.firebaseapp.com", "https://accounts.google.com"],
         },
       },
       hsts: { maxAge: 31536000, includeSubDomains: true },
