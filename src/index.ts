@@ -4,6 +4,7 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import express from "express";
 import multer from "multer";
+import helmet from "helmet";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
 import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev } from "./db/database.js";
@@ -45,6 +46,22 @@ const server = defineServer({
     // Increased limit to 10MB to support base64-encoded reference images
     // in image-editing requests (e.g. mystery card question mark).
     app.use(express.json({ limit: '10mb' }));
+
+    // HTTP security headers (CSP, HSTS, X-Frame-Options, etc.)
+    app.use(helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'", "https://unpkg.com"],
+          styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+          fontSrc: ["'self'", "https://fonts.gstatic.com"],
+          imgSrc: ["'self'", "data:", "blob:"],
+          connectSrc: ["'self'", "wss:", "ws:"],
+        },
+      },
+      hsts: { maxAge: 31536000, includeSubDomains: true },
+      frameguard: { action: "deny" },
+    }));
 
     // Force browsers to revalidate HTML pages (picks up new versioned asset URLs)
     app.use((req, res, next) => {
