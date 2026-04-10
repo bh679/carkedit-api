@@ -100,6 +100,10 @@ const server = defineServer({
       res.json({ status: "ok", timestamp: new Date().toISOString() });
     });
 
+    app.get("/api/carkedit/dev/config", requireAdmin(), (_req: any, res: any) => {
+      res.json({ githubToken: process.env.GITHUB_TOKEN || "" });
+    });
+
     app.get("/api/carkedit/version", (_req: any, res: any) => {
       const pkgPath = path.join(__dirname, "../package.json");
       const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
