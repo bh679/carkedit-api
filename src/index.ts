@@ -449,7 +449,8 @@ const server = defineServer({
       try {
         const user = getUserById(req.params.id);
         if (!user) return res.status(404).json({ error: "User not found" });
-        res.json(user);
+        const { firebase_uid, email, is_admin, ...publicProfile } = user;
+        res.json(publicProfile);
       } catch (err) {
         console.error("[CarkedIt API] Get user error:", err);
         res.status(500).json({ error: "Failed to retrieve user" });
