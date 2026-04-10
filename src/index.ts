@@ -11,6 +11,7 @@ import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, getPackStats, listPackStatsAll } from "./db/packs.js";
 import { createGenerationLog, listGenerationLog, mergeLogEntries } from "./db/generation-log.js";
 import { optionalAuth, requireAuth, requireAdmin, setFirebaseAvailable } from "./middleware/auth.js";
+import { publicWriteLimiter, globalLimiter } from "./middleware/rate-limit.js";
 import type { GameResult, IssueReport } from "./db/types.js";
 import { listProviders, getProvider, buildPrompt } from "./services/image-gen/index.js";
 import { DEFAULT_STYLE } from "./services/image-gen/default-style.js";
@@ -91,6 +92,9 @@ const server = defineServer({
       },
     });
 
+    // Rate limiting — global catch-all for all API routes
+    app.use('/api/carkedit', globalLimiter);
+
     // Apply optional auth to pack, user, and image-gen routes
     app.use('/api/carkedit/packs', optionalAuth());
     app.use('/api/carkedit/users', optionalAuth());
@@ -129,8 +133,11 @@ const server = defineServer({
       }
     });
 
+    // Tighter body parser for unauthenticated POST routes (256kb vs 10mb global)
+    const publicBodyParser = express.json({ limit: '256kb' });
+
     // Game history endpoints
-    app.post("/api/carkedit/games", (req: any, res: any) => {
+    app.post("/api/carkedit/games", publicWriteLimiter, publicBodyParser, (req: any, res: any) => {
       try {
         const { mode, rounds, players, settings, finishedAt, startedAt, hostName, status, clientVersion, isDev } = req.body;
         if (!players || !Array.isArray(players) || players.length === 0) {
@@ -279,7 +286,7 @@ const server = defineServer({
     });
 
     // Issue reporting endpoints
-    app.post("/api/carkedit/issues", (req: any, res: any) => {
+    app.post("/api/carkedit/issues", publicWriteLimiter, publicBodyParser, (req: any, res: any) => {
       try {
         const { category, description, game_mode, screen, phase, room_code,
                 player_count, players_json, game_state_json, device_info,
@@ -327,7 +334,7 @@ const server = defineServer({
 
     // --- Survey endpoints ---
 
-    app.post("/api/carkedit/surveys", (req: any, res: any) => {
+    app.post("/api/carkedit/surveys", publicWriteLimiter, publicBodyParser, (req: any, res: any) => {
       try {
         const { game_id, player_name, session_id, nps_score, comment, improvement, client_version, is_dev } = req.body;
 
