@@ -12,7 +12,7 @@ import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, getPackStats, listPackStatsAll } from "./db/packs.js";
 import { createGenerationLog, listGenerationLog, mergeLogEntries } from "./db/generation-log.js";
 import { optionalAuth, requireAuth, requireAdmin, setFirebaseAvailable } from "./middleware/auth.js";
-import { publicWriteLimiter, publicBodyLimit, globalLimiter } from "./middleware/rate-limit.js";
+import { publicWriteLimiter, publicBodyLimit } from "./middleware/rate-limit.js";
 import type { GameResult, IssueReport } from "./db/types.js";
 import { listProviders, getProvider, buildPrompt } from "./services/image-gen/index.js";
 import { DEFAULT_STYLE } from "./services/image-gen/default-style.js";
@@ -110,9 +110,6 @@ const server = defineServer({
         cb(null, true);
       },
     });
-
-    // Rate limiting — global catch-all for all API routes
-    app.use('/api/carkedit', globalLimiter);
 
     // Apply optional auth to pack, user, and image-gen routes
     app.use('/api/carkedit/packs', optionalAuth());
