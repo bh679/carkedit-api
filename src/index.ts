@@ -490,12 +490,20 @@ const server = defineServer({
 
     // --- Expansion Pack endpoints ---
 
-    app.post("/api/carkedit/packs", (req: any, res: any) => {
+    /** Returns the pack if the authenticated user owns it (or is admin), otherwise sends 403/404. */
+    function requirePackOwner(req: any, res: any): ReturnType<typeof getPackById> | null {
+      const pack = getPackById(req.params.id);
+      if (!pack) { res.status(404).json({ error: "Pack not found" }); return null; }
+      if (pack.creator_id !== req.localUser.id && !req.localUser.is_admin) {
+        res.status(403).json({ error: "You do not own this pack" }); return null;
+      }
+      return pack;
+    }
+
+    app.post("/api/carkedit/packs", requireAuth(), (req: any, res: any) => {
       try {
-        const { creator_id, title, description } = req.body;
-        if (!creator_id || typeof creator_id !== 'string') {
-          return res.status(400).json({ error: "creator_id is required" });
-        }
+        const creator_id = req.localUser!.id;
+        const { title, description } = req.body;
         if (!title || typeof title !== 'string' || title.trim().length === 0) {
           return res.status(400).json({ error: "title is required" });
         }
@@ -630,8 +638,10 @@ const server = defineServer({
       }
     });
 
-    app.put("/api/carkedit/packs/:id", (req: any, res: any) => {
+    app.put("/api/carkedit/packs/:id", requireAuth(), (req: any, res: any) => {
       try {
+        const owned = requirePackOwner(req, res);
+        if (!owned) return;
         // brand_image_url can only be cleared via PUT; uploads go through POST /brand.
         if (req.body && 'brand_image_url' in req.body && req.body.brand_image_url !== null) {
           return res.status(400).json({ error: "brand_image_url can only be set via POST /packs/:id/brand" });
@@ -648,15 +658,15 @@ const server = defineServer({
       }
     });
 
-    app.post("/api/carkedit/packs/:id/brand", brandUpload.single('image'), (req: any, res: any) => {
+    app.post("/api/carkedit/packs/:id/brand", requireAuth(), brandUpload.single('image'), (req: any, res: any) => {
       try {
         if (!req.file) {
           return res.status(400).json({ error: "image file is required" });
         }
-        const existing = getPackById(req.params.id);
+        const existing = requirePackOwner(req, res);
         if (!existing) {
           fs.unlink(req.file.path, () => {});
-          return res.status(404).json({ error: "Pack not found" });
+          return;
         }
         // Delete previous brand file if present and is a local upload
         const prev = existing.brand_image_url;
@@ -676,10 +686,10 @@ const server = defineServer({
       res.status(400).json({ error: err?.message || "Invalid upload" });
     });
 
-    app.delete("/api/carkedit/packs/:id/brand", (req: any, res: any) => {
+    app.delete("/api/carkedit/packs/:id/brand", requireAuth(), (req: any, res: any) => {
       try {
-        const existing = getPackById(req.params.id);
-        if (!existing) return res.status(404).json({ error: "Pack not found" });
+        const existing = requirePackOwner(req, res);
+        if (!existing) return;
         const prev = existing.brand_image_url;
         if (prev && prev.startsWith('/uploads/brands/')) {
           const prevPath = path.join(uploadsDir, prev.replace(/^\/uploads\//, ''));
@@ -693,8 +703,10 @@ const server = defineServer({
       }
     });
 
-    app.delete("/api/carkedit/packs/:id", (req: any, res: any) => {
+    app.delete("/api/carkedit/packs/:id", requireAuth(), (req: any, res: any) => {
       try {
+        const owned = requirePackOwner(req, res);
+        if (!owned) return;
         const deleted = deletePack(req.params.id);
         if (!deleted) return res.status(404).json({ error: "Pack not found" });
         res.status(204).end();
@@ -752,8 +764,10 @@ const server = defineServer({
     }
 
 
-    app.post("/api/carkedit/packs/:id/cards", (req: any, res: any) => {
+    app.post("/api/carkedit/packs/:id/cards", requireAuth(), (req: any, res: any) => {
       try {
+        const owned = requirePackOwner(req, res);
+        if (!owned) return;
         const { cards } = req.body;
         if (!cards || !Array.isArray(cards) || cards.length === 0) {
           return res.status(400).json({ error: "cards array is required" });
@@ -793,8 +807,10 @@ const server = defineServer({
       }
     });
 
-    app.put("/api/carkedit/packs/:id/cards/:cardId", (req: any, res: any) => {
+    app.put("/api/carkedit/packs/:id/cards/:cardId", requireAuth(), (req: any, res: any) => {
       try {
+        const owned = requirePackOwner(req, res);
+        if (!owned) return;
         const body = req.body || {};
         if (body.prompt !== undefined && body.prompt !== null && typeof body.prompt !== 'string') {
           return res.status(400).json({ error: "prompt must be a string or null" });
@@ -833,8 +849,10 @@ const server = defineServer({
       }
     });
 
-    app.delete("/api/carkedit/packs/:id/cards/:cardId", (req: any, res: any) => {
+    app.delete("/api/carkedit/packs/:id/cards/:cardId", requireAuth(), (req: any, res: any) => {
       try {
+        const owned = requirePackOwner(req, res);
+        if (!owned) return;
         const deleted = deleteCard(req.params.id, req.params.cardId);
         if (!deleted) return res.status(404).json({ error: "Card not found" });
         res.status(204).end();
