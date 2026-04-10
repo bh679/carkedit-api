@@ -27,15 +27,3 @@ export function publicBodyLimit(req: Request, res: Response, next: NextFunction)
   }
   next();
 }
-
-/**
- * Lenient global limiter for all API routes.
- * 300 requests per 15-minute window per IP.
- */
-export const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 300,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many requests, please try again later' },
-});
