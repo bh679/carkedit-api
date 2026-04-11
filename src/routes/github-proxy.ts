@@ -244,7 +244,7 @@ router.get("/contrib-graph", async (_req, res) => {
 
 // ── Pre-computed dev stats ─────────────────────────────
 
-const LIVE_REPOS = CONTRIB_REPOS.slice(0, 3);
+const LIVE_REPO_NAMES = CONTRIB_REPOS.slice(0, 3).map(e => e.repo);
 
 let devStatsCache: { data: any; ts: number } | null = null;
 
@@ -260,8 +260,9 @@ async function buildDevStats() {
   const allDays = new Set<string>();
 
   await Promise.all(
-    CONTRIB_REPOS.map(async (repo) => {
-      const isLive = LIVE_REPOS.includes(repo);
+    CONTRIB_REPOS.map(async (entry) => {
+      const repo = entry.repo;
+      const isLive = LIVE_REPO_NAMES.includes(repo);
 
       // Contributors → commit counts
       try {
