@@ -283,11 +283,11 @@ async function buildDevStats() {
       try {
         const url = `${GITHUB_API}/repos/${repo}/stats/contributors`;
         let res = await fetch(url, { headers: ghHeaders() });
-        for (let i = 0; i < 3 && res.status === 202; i++) {
-          await new Promise((r) => setTimeout(r, 2000 * (i + 1)));
+        for (let i = 0; i < 4 && res.status === 202; i++) {
+          await new Promise((r) => setTimeout(r, 3000 * (i + 1)));
           res = await fetch(url, { headers: ghHeaders() });
         }
-        if (res.ok) {
+        if (res.ok && res.status !== 202) {
           const stats = await res.json();
           if (Array.isArray(stats)) {
             for (const contributor of stats) {
