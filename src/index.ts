@@ -16,6 +16,7 @@ import { publicWriteLimiter, publicBodyLimit } from "./middleware/rate-limit.js"
 import type { GameResult, IssueReport } from "./db/types.js";
 import { listProviders, getProvider, buildPrompt } from "./services/image-gen/index.js";
 import { DEFAULT_STYLE } from "./services/image-gen/default-style.js";
+import githubProxyRouter from "./routes/github-proxy.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "4500", 10);
@@ -122,9 +123,8 @@ const server = defineServer({
       res.json({ status: "ok", version: pkg.version, timestamp: new Date().toISOString() });
     });
 
-    app.get("/api/carkedit/dev/config", requireAdmin(), (_req: any, res: any) => {
-      res.json({ githubToken: process.env.GITHUB_TOKEN || "" });
-    });
+    // GitHub API proxy (server-side auth with GITHUB_TOKEN)
+    app.use("/api/carkedit/github", githubProxyRouter);
 
     app.get("/api/carkedit/version", (_req: any, res: any) => {
       const pkgPath = path.join(__dirname, "../package.json");
