@@ -399,7 +399,13 @@ export class GameRoom extends Room<{ state: GameState }> {
     // Mark game as abandoned if it wasn't completed
     if (this._gameId && !this._gameResultSaved) {
       try {
-        abandonGame(this._gameId);
+        let durationSeconds: number | undefined;
+        if (this._gameStartedAt) {
+          durationSeconds = Math.round(
+            (Date.now() - new Date(this._gameStartedAt).getTime()) / 1000
+          );
+        }
+        abandonGame(this._gameId, durationSeconds);
         console.log(`[GameRoom] Game marked as abandoned: ${this._gameId}`);
       } catch (err) {
         console.error(`[GameRoom] Failed to mark game as abandoned:`, err);
