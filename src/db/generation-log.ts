@@ -25,13 +25,15 @@ export function createGenerationLog(entry: {
   prompt_sent: string;
   tokens_used?: number | null;
   cost_usd?: number | null;
+  pack_id?: string | null;
+  card_id?: string | null;
 }): GenerationLogEntry {
   const db = getDb();
   const id = `gen_${randomUUID()}`;
   db.prepare(
     `INSERT INTO generation_log
-      (id, creator_id, deck_type, text, prompt, card_special, options_json, image_url, image_url_b, provider, prompt_sent, tokens_used, cost_usd)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (id, creator_id, deck_type, text, prompt, card_special, options_json, image_url, image_url_b, provider, prompt_sent, tokens_used, cost_usd, pack_id, card_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     entry.creator_id ?? null,
@@ -46,6 +48,8 @@ export function createGenerationLog(entry: {
     entry.prompt_sent,
     entry.tokens_used ?? null,
     entry.cost_usd ?? null,
+    entry.pack_id ?? null,
+    entry.card_id ?? null,
   );
   return db
     .prepare("SELECT * FROM generation_log WHERE id = ?")

@@ -999,7 +999,7 @@ const server = defineServer({
 
     app.post("/api/carkedit/image-gen/generate", requireAdmin(), async (req: any, res: any) => {
       try {
-        const { providerId, cardText, cardPrompt, deckType, style, promptOverride, options, splitPosition, inputImage, cardSpecial } = req.body || {};
+        const { providerId, cardText, cardPrompt, deckType, style, promptOverride, options, splitPosition, inputImage, cardSpecial, pack_id, card_id } = req.body || {};
 
         if (!providerId || typeof providerId !== 'string') {
           return res.status(400).json({ error: "providerId is required" });
@@ -1108,6 +1108,8 @@ const server = defineServer({
             prompt_sent: result.promptSent,
             tokens_used: result.tokensUsed ?? null,
             cost_usd: result.costUsd ?? null,
+            pack_id: typeof pack_id === 'string' && pack_id ? pack_id : null,
+            card_id: typeof card_id === 'string' && card_id ? card_id : null,
           });
           logId = logRow.id;
         } catch (err: any) {
@@ -1152,7 +1154,7 @@ const server = defineServer({
       };
 
       try {
-        const { providerId, cardText, cardPrompt, deckType, style, promptOverride, options, splitPosition, inputImage, cardSpecial } = req.body || {};
+        const { providerId, cardText, cardPrompt, deckType, style, promptOverride, options, splitPosition, inputImage, cardSpecial, pack_id, card_id } = req.body || {};
 
         if (!providerId || typeof providerId !== 'string') {
           sendEvent('error', { error: 'providerId is required' });
@@ -1242,6 +1244,10 @@ const server = defineServer({
             image_url: localImageUrl,
             provider: result.provider,
             prompt_sent: result.promptSent,
+            tokens_used: result.tokensUsed ?? null,
+            cost_usd: result.costUsd ?? null,
+            pack_id: typeof pack_id === 'string' && pack_id ? pack_id : null,
+            card_id: typeof card_id === 'string' && card_id ? card_id : null,
           });
           logId = logRow.id;
         } catch (err: any) {
