@@ -242,6 +242,118 @@ router.get("/contrib-graph", async (_req, res) => {
   }
 });
 
+// ── Pre-computed dev stats ─────────────────────────────
+
+const LIVE_REPOS = CONTRIB_REPOS.slice(0, 3);
+
+let devStatsCache: { data: any; ts: number } | null = null;
+
+async function buildDevStats() {
+  const results = {
+    totalCommits: 0,
+    liveCommits: 0,
+    branchesMerged: 0,
+    linesOfCode: 0,
+    daysWorked: 0,
+  };
+
+  const allDays = new Set<string>();
+
+  await Promise.all(
+    CONTRIB_REPOS.map(async (repo) => {
+      const isLive = LIVE_REPOS.includes(repo);
+
+      // Contributors → commit counts
+      try {
+        const res = await fetch(
+          `${GITHUB_API}/repos/${repo}/contributors?per_page=100`,
+          { headers: ghHeaders() }
+        );
+        if (res.ok) {
+          const contributors = await res.json();
+          if (Array.isArray(contributors)) {
+            const repoCommits = contributors.reduce(
+              (s: number, c: any) => s + (c.contributions || 0),
+              0
+            );
+            results.totalCommits += repoCommits;
+            if (isLive) results.liveCommits += repoCommits;
+          }
+        }
+      } catch { /* skip */ }
+
+      // Languages → lines of code (bytes / ~40 ≈ lines)
+      try {
+        const res = await fetch(
+          `${GITHUB_API}/repos/${repo}/languages`,
+          { headers: ghHeaders() }
+        );
+        if (res.ok) {
+          const langs = await res.json();
+          if (langs && typeof langs === "object") {
+            const totalBytes = Object.values(langs).reduce(
+              (s: number, b: any) => s + (typeof b === "number" ? b : 0),
+              0
+            );
+            results.linesOfCode += Math.round(totalBytes / 40);
+          }
+        }
+      } catch { /* skip */ }
+
+      // Merged PRs → branches merged
+      try {
+        const res = await fetch(
+          `${GITHUB_API}/repos/${repo}/pulls?state=closed&per_page=100`,
+          { headers: ghHeaders() }
+        );
+        if (res.ok) {
+          const pulls = await res.json();
+          if (Array.isArray(pulls)) {
+            results.branchesMerged += pulls.filter(
+              (p: any) => p.merged_at != null
+            ).length;
+          }
+        }
+      } catch { /* skip */ }
+
+      // Commits → unique days worked
+      try {
+        const res = await fetch(
+          `${GITHUB_API}/repos/${repo}/commits?per_page=100`,
+          { headers: ghHeaders() }
+        );
+        if (res.ok) {
+          const commits = await res.json();
+          if (Array.isArray(commits)) {
+            for (const c of commits) {
+              const dateStr =
+                c.commit?.author?.date || c.commit?.committer?.date;
+              if (dateStr) allDays.add(dateStr.slice(0, 10));
+            }
+          }
+        }
+      } catch { /* skip */ }
+    })
+  );
+
+  results.daysWorked = allDays.size;
+  return results;
+}
+
+// GET /dev-stats — aggregated development statistics
+router.get("/dev-stats", async (_req, res) => {
+  try {
+    if (devStatsCache && Date.now() - devStatsCache.ts < CONTRIB_CACHE_TTL) {
+      return res.json(devStatsCache.data);
+    }
+    const data = await buildDevStats();
+    devStatsCache = { data, ts: Date.now() };
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ error: "Failed to build dev stats" });
+  }
+});
+
 /** Forward GitHub rate-limit headers so the client can display them. */
 function forwardRateLimit(ghRes: Response, expressRes: any) {
   const remaining = ghRes.headers.get("X-RateLimit-Remaining");
