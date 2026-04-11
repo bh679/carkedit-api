@@ -207,6 +207,8 @@ export interface GenerationLogEntry {
   prompt_sent: string;         // exact final prompt sent upstream
   tokens_used: number | null;  // provider credits/tokens consumed (null = pre-tracking)
   cost_usd: number | null;     // estimated cost in USD (null = pre-tracking)
+  pack_id: string | null;      // expansion pack this generation was for (null = scratch/unknown)
+  card_id: string | null;      // expansion card this generation was for (null = scratch/unknown)
   created_at: string;
 }
 

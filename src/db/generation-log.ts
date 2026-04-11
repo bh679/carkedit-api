@@ -25,13 +25,15 @@ export function createGenerationLog(entry: {
   prompt_sent: string;
   tokens_used?: number | null;
   cost_usd?: number | null;
+  pack_id?: string | null;
+  card_id?: string | null;
 }): GenerationLogEntry {
   const db = getDb();
   const id = `gen_${randomUUID()}`;
   db.prepare(
     `INSERT INTO generation_log
-      (id, creator_id, deck_type, text, prompt, card_special, options_json, image_url, image_url_b, provider, prompt_sent, tokens_used, cost_usd)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (id, creator_id, deck_type, text, prompt, card_special, options_json, image_url, image_url_b, provider, prompt_sent, tokens_used, cost_usd, pack_id, card_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     entry.creator_id ?? null,
@@ -46,6 +48,8 @@ export function createGenerationLog(entry: {
     entry.prompt_sent,
     entry.tokens_used ?? null,
     entry.cost_usd ?? null,
+    entry.pack_id ?? null,
+    entry.card_id ?? null,
   );
   return db
     .prepare("SELECT * FROM generation_log WHERE id = ?")
@@ -120,16 +124,24 @@ export function mergeLogEntries(
   const merge = db.prepare("SELECT * FROM generation_log WHERE id = ?").get(mergeId) as GenerationLogEntry | undefined;
   if (!merge) throw new Error(`Log entry ${mergeId} not found`);
 
+  // Sum cost/token data from both entries so split-card merges preserve
+  // the total generation cost (the "merge" row is about to be deleted).
+  const combinedTokens = (keep.tokens_used ?? 0) + (merge.tokens_used ?? 0) || null;
+  const combinedCost = (keep.cost_usd ?? 0) + (merge.cost_usd ?? 0) || null;
+
   const run = db.transaction(() => {
     db.prepare(
       `UPDATE generation_log
-       SET image_url_b = ?, text = ?, card_special = ?, options_json = ?
+       SET image_url_b = ?, text = ?, card_special = ?, options_json = ?,
+           tokens_used = ?, cost_usd = ?
        WHERE id = ?`
     ).run(
       updates.image_url_b,
       updates.text ?? keep.text,
       updates.card_special ?? keep.card_special,
       updates.options_json ?? keep.options_json,
+      combinedTokens,
+      combinedCost,
       keepId,
     );
     db.prepare("DELETE FROM generation_log WHERE id = ?").run(mergeId);

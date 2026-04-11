@@ -168,6 +168,8 @@ export type PackStatsRow = {
   total_plays: number;
   total_wins: number;
   win_rate: number;
+  total_cost_usd: number;
+  total_generations: number;
   created_at: string;
 };
 
@@ -198,7 +200,9 @@ export function listPackStatsAll(): PackStatsRow[] {
         SELECT COUNT(*) FROM card_plays cp
         INNER JOIN expansion_cards ec3 ON ec3.id = cp.card_id
         WHERE ec3.pack_id = ep.id AND cp.is_winner = 1
-      ) as total_wins
+      ) as total_wins,
+      (SELECT COALESCE(SUM(gl.cost_usd), 0) FROM generation_log gl WHERE gl.pack_id = ep.id) as total_cost_usd,
+      (SELECT COUNT(*) FROM generation_log gl WHERE gl.pack_id = ep.id) as total_generations
     FROM expansion_packs ep
     LEFT JOIN users u ON u.id = ep.creator_id
     ORDER BY usage_count DESC, ep.created_at DESC

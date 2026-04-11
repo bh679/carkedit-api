@@ -343,6 +343,13 @@ export function initDatabase(): void {
   if (!genLogCols.includes('cost_usd')) {
     db.exec('ALTER TABLE generation_log ADD COLUMN cost_usd REAL');
   }
+  if (!genLogCols.includes('pack_id')) {
+    db.exec('ALTER TABLE generation_log ADD COLUMN pack_id TEXT');
+  }
+  if (!genLogCols.includes('card_id')) {
+    db.exec('ALTER TABLE generation_log ADD COLUMN card_id TEXT');
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_gen_log_pack ON generation_log(pack_id)');
 }
 
 export function saveGameResult(result: GameResult): string {
