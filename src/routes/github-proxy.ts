@@ -279,24 +279,20 @@ async function buildDevStats() {
         }
       } catch { /* skip */ }
 
-      // Stats/contributors → lines of code (additions)
+      // Languages → lines of code (bytes / ~40 ≈ lines)
       try {
-        const url = `${GITHUB_API}/repos/${repo}/stats/contributors`;
-        let res = await fetch(url, { headers: ghHeaders() });
-        for (let i = 0; i < 4 && res.status === 202; i++) {
-          await new Promise((r) => setTimeout(r, 3000 * (i + 1)));
-          res = await fetch(url, { headers: ghHeaders() });
-        }
-        if (res.ok && res.status !== 202) {
-          const stats = await res.json();
-          if (Array.isArray(stats)) {
-            for (const contributor of stats) {
-              if (Array.isArray(contributor.weeks)) {
-                for (const week of contributor.weeks) {
-                  results.linesOfCode += week.a || 0;
-                }
-              }
-            }
+        const res = await fetch(
+          `${GITHUB_API}/repos/${repo}/languages`,
+          { headers: ghHeaders() }
+        );
+        if (res.ok) {
+          const langs = await res.json();
+          if (langs && typeof langs === "object") {
+            const totalBytes = Object.values(langs).reduce(
+              (s: number, b: any) => s + (typeof b === "number" ? b : 0),
+              0
+            );
+            results.linesOfCode += Math.round(totalBytes / 40);
           }
         }
       } catch { /* skip */ }
