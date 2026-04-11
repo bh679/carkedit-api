@@ -748,6 +748,29 @@ export function getCardStats(devFilter: 'all' | 'dev' | 'nodev' = 'all'): { card
       }
     }
   }
+  // Include expansion pack cards
+  const expansionCards = db.prepare(`
+    SELECT id, text, deck_type FROM expansion_cards
+  `).all() as { id: string; text: string; deck_type: string }[];
+
+  const deckTypeMap: Record<string, string> = { die: 'die', live: 'living', bye: 'bye' };
+
+  for (const ec of expansionCards) {
+    const deck = deckTypeMap[ec.deck_type] || ec.deck_type;
+    const key = `${deck}:${ec.id}`;
+    const played = playedMap.get(key);
+    const dc = drawMap.get(key) || 0;
+    if (played) {
+      played.draw_count = dc;
+      played.win_rate = played.play_count > 0 ? Math.round((played.win_count / played.play_count) * 100) : 0;
+      played.play_rate = dc > 0 ? Math.round((played.play_count / dc) * 100) : 0;
+      allCards.push(played);
+      playedMap.delete(key);
+    } else {
+      allCards.push({ card_id: ec.id, card_text: ec.text, card_deck: deck, play_count: 0, win_count: 0, win_rate: 0, draw_count: dc, play_rate: 0 });
+    }
+  }
+
   // Include any played cards not in the source data (e.g. removed cards)
   for (const card of playedMap.values()) {
     const key = `${card.card_deck}:${card.card_id}`;
