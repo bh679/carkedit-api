@@ -597,7 +597,7 @@ export function getGameById(id: string): GameDetail | null {
   // Fetch issue reports linked to this game's room_code
   if (game.room_code) {
     game.issues = db.prepare(
-      'SELECT id, created_at, category, description, screen, phase, game_mode, device_info, client_version FROM issue_reports WHERE room_code = ? ORDER BY created_at ASC'
+      'SELECT id, created_at, category, description, screen, phase, game_mode, device_info, client_version, error_log FROM issue_reports WHERE room_code = ? ORDER BY created_at ASC'
     ).all(game.room_code) as IssueReport[];
     game.issue_count = game.issues.length;
   } else {
