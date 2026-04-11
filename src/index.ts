@@ -307,14 +307,10 @@ const server = defineServer({
                 player_count, players_json, game_state_json, device_info,
                 error_log, client_version } = req.body;
 
-        if (!category || typeof category !== 'string' || category.trim().length === 0) {
-          return res.status(400).json({ error: "At least one category is required" });
-        }
-
         const report: IssueReport = {
           id: randomUUID(),
           created_at: new Date().toISOString(),
-          category: category.trim(),
+          category: (typeof category === 'string' && category.trim()) || 'uncategorised',
           description: description || undefined,
           game_mode: game_mode || undefined,
           screen: screen || undefined,
