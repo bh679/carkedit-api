@@ -183,7 +183,7 @@ async function buildContribGraph(): Promise<any[]> {
   const sinceISO = since.toISOString();
 
   // Fetch commits from all repos in parallel (100 per repo is plenty for 3 months)
-  const allCommits: Date[] = [];
+  const allCommits: { date: Date; active: boolean }[] = [];
   await Promise.all(
     CONTRIB_REPOS.map(async (entry) => {
       try {
@@ -194,16 +194,18 @@ async function buildContribGraph(): Promise<any[]> {
         if (!ghRes.ok) return;
         const commits = (await ghRes.json()) as any[];
         if (!Array.isArray(commits)) return;
+        const active = LIVE_REPO_NAMES.includes(entry.repo);
         for (const c of commits) {
           const dateStr = c.commit?.author?.date || c.commit?.committer?.date;
-          if (dateStr) allCommits.push(new Date(dateStr));
+          if (dateStr) allCommits.push({ date: new Date(dateStr), active });
         }
       } catch { /* skip repo */ }
     })
   );
 
-  // Build week buckets: { weekSunday -> days[0..6] }
-  const buckets = new Map<number, number[]>();
+  // Build week buckets: { weekSunday -> { days[0..6], activeDays[0..6] } }
+  const buckets = new Map<number, { days: number[]; activeDays: number[] }>();
+  const emptyBucket = () => ({ days: [0, 0, 0, 0, 0, 0, 0], activeDays: [0, 0, 0, 0, 0, 0, 0] });
 
   // Pre-fill empty weeks for the last 13 weeks
   const now = new Date();
@@ -211,21 +213,23 @@ async function buildContribGraph(): Promise<any[]> {
     const d = new Date(now);
     d.setDate(d.getDate() - i * 7);
     const sunday = sundayOfWeek(d);
-    if (!buckets.has(sunday)) buckets.set(sunday, [0, 0, 0, 0, 0, 0, 0]);
+    if (!buckets.has(sunday)) buckets.set(sunday, emptyBucket());
   }
 
   // Tally commits into day slots
-  for (const date of allCommits) {
-    const sunday = sundayOfWeek(date);
-    if (!buckets.has(sunday)) buckets.set(sunday, [0, 0, 0, 0, 0, 0, 0]);
-    const dayOfWeek = date.getUTCDay(); // 0=Sun .. 6=Sat
-    buckets.get(sunday)![dayOfWeek]++;
+  for (const commit of allCommits) {
+    const sunday = sundayOfWeek(commit.date);
+    if (!buckets.has(sunday)) buckets.set(sunday, emptyBucket());
+    const dayOfWeek = commit.date.getUTCDay(); // 0=Sun .. 6=Sat
+    const bucket = buckets.get(sunday)!;
+    bucket.days[dayOfWeek]++;
+    if (commit.active) bucket.activeDays[dayOfWeek]++;
   }
 
   // Sort by week timestamp and return
   return [...buckets.entries()]
     .sort((a, b) => a[0] - b[0])
-    .map(([week, days]) => ({ week, days }));
+    .map(([week, { days, activeDays }]) => ({ week, days, activeDays }));
 }
 
 // GET /contrib-graph — pre-merged contribution data from all repos
