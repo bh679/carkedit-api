@@ -58,7 +58,7 @@ const server = defineServer({
           styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
           fontSrc: ["'self'", "https://fonts.gstatic.com"],
           imgSrc: ["'self'", "data:", "blob:", "https://*.googleusercontent.com"],
-          connectSrc: ["'self'", "wss:", "ws:", "https://*.googleapis.com", "https://*.firebaseapp.com", "https://www.gstatic.com"],
+          connectSrc: ["'self'", "wss:", "ws:", "https://*.googleapis.com", "https://*.firebaseapp.com", "https://www.gstatic.com", "https://raw.githubusercontent.com"],
           frameSrc: ["'self'", "https://*.firebaseapp.com", "https://accounts.google.com"],
         },
       },
