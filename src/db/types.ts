@@ -48,6 +48,7 @@ export interface GameSummary {
   api_version: string | null;
   client_version: string | null;
   last_activity_at: string | null;
+  issue_count: number;
   players: GamePlayerResult[];
 }
 
@@ -64,6 +65,7 @@ export interface GameDetailCardPlay {
 export interface GameDetail extends GameSummary {
   settings_json: string | null;
   card_plays: GameDetailCardPlay[];
+  issues: IssueReport[];
 }
 
 export interface CardPlay {

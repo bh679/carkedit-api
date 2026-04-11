@@ -505,7 +505,8 @@ export function getRecentGames(filters: GameFilters = {}): { games: GameSummary[
     SELECT g.id, g.started_at, g.finished_at, g.mode, g.room_code, g.host_name, g.rounds, g.player_count,
       g.winner_name, g.winner_score, g.duration_seconds, g.status, g.live_status, g.has_error, g.is_dev,
       g.api_version, g.client_version,
-      (SELECT MAX(e.created_at) FROM game_events e WHERE e.game_id = g.id) as last_activity_at
+      (SELECT MAX(e.created_at) FROM game_events e WHERE e.game_id = g.id) as last_activity_at,
+      (SELECT COUNT(*) FROM issue_reports ir WHERE ir.room_code = g.room_code AND g.room_code IS NOT NULL) as issue_count
     FROM games g ${where} ORDER BY COALESCE(NULLIF(g.finished_at, ''), g.started_at) DESC LIMIT ? OFFSET ?
   `).all(...params, limit, offset) as GameSummary[];
 
@@ -592,6 +593,17 @@ export function getGameById(id: string): GameDetail | null {
     SELECT round, phase, card_id, card_text, card_deck, player_name, is_winner
     FROM card_plays WHERE game_id = ? ORDER BY round ASC, is_winner DESC
   `).all(id) as GameDetailCardPlay[];
+
+  // Fetch issue reports linked to this game's room_code
+  if (game.room_code) {
+    game.issues = db.prepare(
+      'SELECT id, created_at, category, description, screen, phase, game_mode, device_info, client_version FROM issue_reports WHERE room_code = ? ORDER BY created_at ASC'
+    ).all(game.room_code) as IssueReport[];
+    game.issue_count = game.issues.length;
+  } else {
+    game.issues = [];
+    game.issue_count = 0;
+  }
 
   return game;
 }
