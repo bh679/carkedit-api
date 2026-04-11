@@ -117,7 +117,9 @@ const server = defineServer({
     app.use('/api/carkedit/image-gen', optionalAuth());
 
     app.get("/api/carkedit/health", (_req: any, res: any) => {
-      res.json({ status: "ok", timestamp: new Date().toISOString() });
+      const pkgPath = path.join(__dirname, "../package.json");
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+      res.json({ status: "ok", version: pkg.version, timestamp: new Date().toISOString() });
     });
 
     app.get("/api/carkedit/dev/config", requireAdmin(), (_req: any, res: any) => {
