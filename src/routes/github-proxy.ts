@@ -158,12 +158,13 @@ router.get("/wiki/:owner/:repo/:page", async (req, res) => {
 
 // ── Pre-computed contribution graph ──────────────────
 
-const CONTRIB_REPOS = [
-  "bh679/carkedit-online",
-  "bh679/carkedit-api",
-  "bh679/CarkedIt",
-  "bh679/carkedit-client",
-  "bh679/fill-in-the-blank",
+const CONTRIB_REPOS: { repo: string; since?: string; until?: string }[] = [
+  { repo: "bh679/carkedit-online" },
+  { repo: "bh679/carkedit-api" },
+  { repo: "bh679/CarkedIt" },
+  { repo: "bh679/carkedit-client" },
+  { repo: "bh679/fill-in-the-blank" },
+  { repo: "bh679/claude-templates", since: "2026-03-19T00:00:00Z", until: "2026-04-12T00:00:00Z" },
 ];
 
 let contribCache: { data: any[]; ts: number } | null = null;
@@ -184,9 +185,11 @@ async function buildContribGraph(): Promise<any[]> {
   // Fetch commits from all repos in parallel (100 per repo is plenty for 3 months)
   const allCommits: Date[] = [];
   await Promise.all(
-    CONTRIB_REPOS.map(async (repo) => {
+    CONTRIB_REPOS.map(async (entry) => {
       try {
-        const url = `${GITHUB_API}/repos/${repo}/commits?since=${sinceISO}&per_page=100`;
+        const repoSince = entry.since || sinceISO;
+        let url = `${GITHUB_API}/repos/${entry.repo}/commits?since=${repoSince}&per_page=100`;
+        if (entry.until) url += `&until=${entry.until}`;
         const ghRes = await fetch(url, { headers: ghHeaders() });
         if (!ghRes.ok) return;
         const commits = (await ghRes.json()) as any[];
