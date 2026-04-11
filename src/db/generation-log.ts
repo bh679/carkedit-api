@@ -124,16 +124,24 @@ export function mergeLogEntries(
   const merge = db.prepare("SELECT * FROM generation_log WHERE id = ?").get(mergeId) as GenerationLogEntry | undefined;
   if (!merge) throw new Error(`Log entry ${mergeId} not found`);
 
+  // Sum cost/token data from both entries so split-card merges preserve
+  // the total generation cost (the "merge" row is about to be deleted).
+  const combinedTokens = (keep.tokens_used ?? 0) + (merge.tokens_used ?? 0) || null;
+  const combinedCost = (keep.cost_usd ?? 0) + (merge.cost_usd ?? 0) || null;
+
   const run = db.transaction(() => {
     db.prepare(
       `UPDATE generation_log
-       SET image_url_b = ?, text = ?, card_special = ?, options_json = ?
+       SET image_url_b = ?, text = ?, card_special = ?, options_json = ?,
+           tokens_used = ?, cost_usd = ?
        WHERE id = ?`
     ).run(
       updates.image_url_b,
       updates.text ?? keep.text,
       updates.card_special ?? keep.card_special,
       updates.options_json ?? keep.options_json,
+      combinedTokens,
+      combinedCost,
       keepId,
     );
     db.prepare("DELETE FROM generation_log WHERE id = ?").run(mergeId);
