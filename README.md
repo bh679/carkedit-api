@@ -29,4 +29,10 @@ Copy `.env.example` to `.env`:
 
 ## License
 
-ISC
+This project is licensed under the [Business Source License 1.1](./LICENSE).
+
+- **Additional Use Grant:** Non-production use (development, testing, personal non-commercial play)
+- **Change Date:** Rolling: 10 years after each version is published
+- **Change License:** GNU Affero General Public License v3.0 (AGPLv3)
+
+For commercial licensing, contact brennan@brennanhatton.com.
