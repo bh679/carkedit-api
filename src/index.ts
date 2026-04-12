@@ -12,7 +12,7 @@ import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, co
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag } from "./db/users.js";
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, getPackStats, listPackStatsAll } from "./db/packs.js";
 import { createGenerationLog, listGenerationLog, mergeLogEntries } from "./db/generation-log.js";
-import { optionalAuth, requireAuth, requireAdmin, setFirebaseAvailable } from "./middleware/auth.js";
+import { optionalAuth, requireAuth, requireAdmin, setFirebaseAvailable, isFirebaseAvailable } from "./middleware/auth.js";
 import { publicWriteLimiter, publicBodyLimit } from "./middleware/rate-limit.js";
 import type { GameResult, IssueReport } from "./db/types.js";
 import { listProviders, getProvider, buildPrompt } from "./services/image-gen/index.js";
@@ -145,6 +145,70 @@ const server = defineServer({
       const pkgPath = path.join(__dirname, "../package.json");
       const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
       res.json({ status: "ok", version: pkg.version, timestamp: new Date().toISOString() });
+    });
+
+    // Admin-only: verify secrets/tokens are valid without exposing them
+    app.get("/api/carkedit/health/secrets", requireAdmin(), async (_req: any, res: any) => {
+      try {
+        const timeout = (ms: number) => AbortSignal.timeout(ms);
+
+        const [githubResult, leonardoResult] = await Promise.allSettled([
+          // GitHub: check token via /rate_limit endpoint
+          (async () => {
+            const token = process.env.GITHUB_TOKEN;
+            if (!token) return { configured: false, valid: null as boolean | null };
+            const headers: Record<string, string> = {
+              Accept: "application/vnd.github.v3+json",
+              Authorization: `token ${token}`,
+            };
+            const ghRes = await fetch("https://api.github.com/rate_limit", { headers, signal: timeout(5000) });
+            if (!ghRes.ok) return { configured: true, valid: false };
+            const data = await ghRes.json() as { rate?: { remaining?: number; limit?: number; reset?: number } };
+            return {
+              configured: true,
+              valid: true,
+              rateLimit: {
+                remaining: data.rate?.remaining,
+                limit: data.rate?.limit,
+                resetAt: data.rate?.reset ? new Date(data.rate.reset * 1000).toISOString() : null,
+              },
+            };
+          })(),
+          // Leonardo: check key via /me endpoint
+          (async () => {
+            const key = process.env.LEONARDO_API_KEY;
+            if (!key) return { configured: false, valid: null as boolean | null };
+            const leoRes = await fetch("https://cloud.leonardo.ai/api/rest/v1/me", {
+              headers: { Authorization: `Bearer ${key}` },
+              signal: timeout(5000),
+            });
+            return { configured: true, valid: leoRes.ok };
+          })(),
+        ]);
+
+        const services: Record<string, any> = {
+          github: githubResult.status === "fulfilled"
+            ? githubResult.value
+            : { configured: !!process.env.GITHUB_TOKEN, valid: false, error: "Check timed out" },
+          leonardo: leonardoResult.status === "fulfilled"
+            ? leonardoResult.value
+            : { configured: !!process.env.LEONARDO_API_KEY, valid: false, error: "Check timed out" },
+          flux: {
+            configured: !!process.env.FLUX_API_KEY,
+            valid: process.env.FLUX_API_KEY ? null : null,
+            ...(process.env.FLUX_API_KEY ? {} : {}),
+          },
+          firebase: {
+            configured: !!process.env.FIREBASE_SERVICE_ACCOUNT_PATH,
+            valid: isFirebaseAvailable(),
+          },
+        };
+
+        res.json({ timestamp: new Date().toISOString(), services });
+      } catch (err) {
+        console.error("[CarkedIt API] Secrets health check error:", err);
+        res.status(500).json({ error: "Failed to check secrets health" });
+      }
     });
 
     // GitHub API proxy (server-side auth with GITHUB_TOKEN)
