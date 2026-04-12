@@ -96,6 +96,34 @@ router.get("/repos/:owner/:repo/events", async (req, res) => {
   }
 });
 
+// GET /repos/:owner/:repo/pulls
+router.get("/repos/:owner/:repo/pulls", async (req, res) => {
+  try {
+    const { owner, repo } = req.params;
+    const qs = new URLSearchParams(req.query as Record<string, string>).toString();
+    const url = `${GITHUB_API}/repos/${owner}/${repo}/pulls${qs ? `?${qs}` : ""}`;
+    const ghRes = await fetch(url, { headers: ghHeaders() });
+    forwardRateLimit(ghRes, res);
+    res.status(ghRes.status).json(await ghRes.json());
+  } catch (err) {
+    res.status(502).json({ error: "GitHub proxy error" });
+  }
+});
+
+// GET /repos/:owner/:repo/branches
+router.get("/repos/:owner/:repo/branches", async (req, res) => {
+  try {
+    const { owner, repo } = req.params;
+    const qs = new URLSearchParams(req.query as Record<string, string>).toString();
+    const url = `${GITHUB_API}/repos/${owner}/${repo}/branches${qs ? `?${qs}` : ""}`;
+    const ghRes = await fetch(url, { headers: ghHeaders() });
+    forwardRateLimit(ghRes, res);
+    res.status(ghRes.status).json(await ghRes.json());
+  } catch (err) {
+    res.status(502).json({ error: "GitHub proxy error" });
+  }
+});
+
 // GET /repos/:owner/:repo/contents/* (wildcard path for nested file paths)
 router.get("/repos/:owner/:repo/contents/*", async (req, res) => {
   try {
@@ -269,6 +297,8 @@ async function buildDevStats() {
     daysWorked: 0,
   };
 
+  let successCount = 0;
+  let failCount = 0;
   const allDays = new Set<string>();
 
   await Promise.all(
@@ -292,8 +322,9 @@ async function buildDevStats() {
             results.totalCommits += repoCommits;
             if (isLive) results.liveCommits += repoCommits;
           }
-        }
-      } catch { /* skip */ }
+          successCount++;
+        } else { failCount++; }
+      } catch { failCount++; }
 
       // Languages → lines of code (bytes / ~40 ≈ lines)
       try {
@@ -310,8 +341,9 @@ async function buildDevStats() {
             );
             results.linesOfCode += Math.round(totalBytes / 40);
           }
-        }
-      } catch { /* skip */ }
+          successCount++;
+        } else { failCount++; }
+      } catch { failCount++; }
 
       // Merged PRs → branches merged
       try {
@@ -326,8 +358,9 @@ async function buildDevStats() {
               (p: any) => p.merged_at != null
             ).length;
           }
-        }
-      } catch { /* skip */ }
+          successCount++;
+        } else { failCount++; }
+      } catch { failCount++; }
 
       // Commits → unique days worked
       try {
@@ -344,13 +377,22 @@ async function buildDevStats() {
               if (dateStr) allDays.add(dateStr.slice(0, 10));
             }
           }
-        }
-      } catch { /* skip */ }
+          successCount++;
+        } else { failCount++; }
+      } catch { failCount++; }
     })
   );
 
   results.daysWorked = allDays.size;
-  return results;
+  return {
+    ...results,
+    _meta: {
+      apiCallsSucceeded: successCount,
+      apiCallsFailed: failCount,
+      partial: failCount > 0,
+      reliable: failCount === 0,
+    },
+  };
 }
 
 // GET /dev-stats — aggregated development statistics
@@ -360,7 +402,14 @@ router.get("/dev-stats", async (_req, res) => {
       return res.json(devStatsCache.data);
     }
     const data = await buildDevStats();
-    devStatsCache = { data, ts: Date.now() };
+    // If every GitHub API call failed, return 503 so clients keep cached data
+    if (data._meta.apiCallsSucceeded === 0) {
+      return res.status(503).json({ error: "GitHub API unavailable", _meta: data._meta });
+    }
+    // Only cache fully reliable data
+    if (data._meta.reliable) {
+      devStatsCache = { data, ts: Date.now() };
+    }
     res.json(data);
   } catch (err) {
     res.status(502).json({ error: "Failed to build dev stats" });

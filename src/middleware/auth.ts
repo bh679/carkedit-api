@@ -18,6 +18,10 @@ export function setFirebaseAvailable(available: boolean): void {
   firebaseAuthAvailable = available;
 }
 
+export function isFirebaseAvailable(): boolean {
+  return firebaseAuthAvailable;
+}
+
 /**
  * Optional auth — attaches user if Bearer token present, does NOT reject without token.
  */
