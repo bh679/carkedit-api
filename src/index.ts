@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import https from "node:https";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
@@ -48,6 +49,29 @@ const server = defineServer({
     // Increased limit to 10MB to support base64-encoded reference images
     // in image-editing requests (e.g. mystery card question mark).
     app.use(express.json({ limit: '10mb' }));
+
+    // Reverse-proxy Firebase auth handler so the OAuth redirect stays on
+    // the same origin. This avoids Safari ITP blocking third-party cookies
+    // when authDomain points to firebaseapp.com.
+    app.all('/__/auth/*', (req, res) => {
+      const targetUrl = `https://carkedit-5cc8e.firebaseapp.com${req.originalUrl}`;
+      const proxyReq = https.request(targetUrl, {
+        method: req.method,
+        headers: { ...req.headers, host: 'carkedit-5cc8e.firebaseapp.com' },
+      }, (proxyRes) => {
+        res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
+        proxyRes.pipe(res);
+      });
+      proxyReq.on('error', (err) => {
+        console.error('[CarkedIt API] Auth proxy error:', err);
+        res.status(502).send('Auth proxy error');
+      });
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        req.pipe(proxyReq);
+      } else {
+        proxyReq.end();
+      }
+    });
 
     // HTTP security headers (CSP, HSTS, X-Frame-Options, etc.)
     app.use(helmet({
