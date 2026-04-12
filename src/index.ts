@@ -7,7 +7,7 @@ import multer from "multer";
 import helmet from "helmet";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
-import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev } from "./db/database.js";
+import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev, saveMailingListEntry } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag } from "./db/users.js";
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, getPackStats, listPackStatsAll } from "./db/packs.js";
 import { createGenerationLog, listGenerationLog, mergeLogEntries } from "./db/generation-log.js";
@@ -395,6 +395,25 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Get surveys error:", err);
         res.status(500).json({ error: "Failed to retrieve survey responses" });
+      }
+    });
+
+    // --- Mailing list endpoint ---
+
+    app.post("/api/carkedit/mailing-list", publicWriteLimiter, publicBodyLimit, (req: any, res: any) => {
+      try {
+        const { email, player_name, source } = req.body;
+        if (!email || typeof email !== 'string' || !email.includes('@')) {
+          return res.status(400).json({ error: "Valid email is required" });
+        }
+        const saved = saveMailingListEntry(randomUUID(), email.trim().toLowerCase(), player_name, source);
+        if (!saved) {
+          return res.status(409).json({ error: "Email already subscribed" });
+        }
+        res.json({ status: "subscribed" });
+      } catch (err) {
+        console.error("[CarkedIt API] Mailing list error:", err);
+        res.status(500).json({ error: "Failed to save subscription" });
       }
     });
 

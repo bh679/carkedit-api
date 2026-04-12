@@ -220,6 +220,15 @@ export function initDatabase(): void {
     );
     CREATE INDEX IF NOT EXISTS idx_gen_log_created ON generation_log(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_gen_log_creator ON generation_log(creator_id);
+
+    CREATE TABLE IF NOT EXISTS mailing_list (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      player_name TEXT,
+      source TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_mailing_email ON mailing_list(email);
   `);
 
   // Migrate: add new columns if they don't exist (for existing DBs)
@@ -926,4 +935,14 @@ export function getSurveyResponses(limit = 50, offset = 0, devFilter: SurveyDevF
     FROM survey_responses ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?
   `).all(limit, offset) as SurveyResponse[];
   return { responses, total };
+}
+
+// ── Mailing list ───────────────────────────────────────────
+
+export function saveMailingListEntry(id: string, email: string, playerName?: string, source?: string): boolean {
+  const info = db.prepare(`
+    INSERT OR IGNORE INTO mailing_list (id, email, player_name, source, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(id, email, playerName || null, source || null, new Date().toISOString());
+  return info.changes > 0;
 }
