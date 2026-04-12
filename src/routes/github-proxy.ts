@@ -158,12 +158,13 @@ router.get("/wiki/:owner/:repo/:page", async (req, res) => {
 
 // ── Pre-computed contribution graph ──────────────────
 
-const CONTRIB_REPOS = [
-  "bh679/carkedit-online",
-  "bh679/carkedit-api",
-  "bh679/CarkedIt",
-  "bh679/carkedit-client",
-  "bh679/fill-in-the-blank",
+const CONTRIB_REPOS: { repo: string; since?: string; until?: string }[] = [
+  { repo: "bh679/carkedit-online" },
+  { repo: "bh679/carkedit-api" },
+  { repo: "bh679/CarkedIt" },
+  { repo: "bh679/carkedit-client" },
+  { repo: "bh679/fill-in-the-blank" },
+  { repo: "bh679/claude-templates", since: "2026-03-19T00:00:00Z", until: "2026-04-12T00:00:00Z" },
 ];
 
 let contribCache: { data: any[]; ts: number } | null = null;
@@ -182,25 +183,29 @@ async function buildContribGraph(): Promise<any[]> {
   const sinceISO = since.toISOString();
 
   // Fetch commits from all repos in parallel (100 per repo is plenty for 3 months)
-  const allCommits: Date[] = [];
+  const allCommits: { date: Date; active: boolean }[] = [];
   await Promise.all(
-    CONTRIB_REPOS.map(async (repo) => {
+    CONTRIB_REPOS.map(async (entry) => {
       try {
-        const url = `${GITHUB_API}/repos/${repo}/commits?since=${sinceISO}&per_page=100`;
+        const repoSince = entry.since || sinceISO;
+        let url = `${GITHUB_API}/repos/${entry.repo}/commits?since=${repoSince}&per_page=100`;
+        if (entry.until) url += `&until=${entry.until}`;
         const ghRes = await fetch(url, { headers: ghHeaders() });
         if (!ghRes.ok) return;
         const commits = (await ghRes.json()) as any[];
         if (!Array.isArray(commits)) return;
+        const active = LIVE_REPO_NAMES.includes(entry.repo);
         for (const c of commits) {
           const dateStr = c.commit?.author?.date || c.commit?.committer?.date;
-          if (dateStr) allCommits.push(new Date(dateStr));
+          if (dateStr) allCommits.push({ date: new Date(dateStr), active });
         }
       } catch { /* skip repo */ }
     })
   );
 
-  // Build week buckets: { weekSunday -> days[0..6] }
-  const buckets = new Map<number, number[]>();
+  // Build week buckets: { weekSunday -> { days[0..6], activeDays[0..6] } }
+  const buckets = new Map<number, { days: number[]; activeDays: number[] }>();
+  const emptyBucket = () => ({ days: [0, 0, 0, 0, 0, 0, 0], activeDays: [0, 0, 0, 0, 0, 0, 0] });
 
   // Pre-fill empty weeks for the last 13 weeks
   const now = new Date();
@@ -208,21 +213,23 @@ async function buildContribGraph(): Promise<any[]> {
     const d = new Date(now);
     d.setDate(d.getDate() - i * 7);
     const sunday = sundayOfWeek(d);
-    if (!buckets.has(sunday)) buckets.set(sunday, [0, 0, 0, 0, 0, 0, 0]);
+    if (!buckets.has(sunday)) buckets.set(sunday, emptyBucket());
   }
 
   // Tally commits into day slots
-  for (const date of allCommits) {
-    const sunday = sundayOfWeek(date);
-    if (!buckets.has(sunday)) buckets.set(sunday, [0, 0, 0, 0, 0, 0, 0]);
-    const dayOfWeek = date.getUTCDay(); // 0=Sun .. 6=Sat
-    buckets.get(sunday)![dayOfWeek]++;
+  for (const commit of allCommits) {
+    const sunday = sundayOfWeek(commit.date);
+    if (!buckets.has(sunday)) buckets.set(sunday, emptyBucket());
+    const dayOfWeek = commit.date.getUTCDay(); // 0=Sun .. 6=Sat
+    const bucket = buckets.get(sunday)!;
+    bucket.days[dayOfWeek]++;
+    if (commit.active) bucket.activeDays[dayOfWeek]++;
   }
 
   // Sort by week timestamp and return
   return [...buckets.entries()]
     .sort((a, b) => a[0] - b[0])
-    .map(([week, days]) => ({ week, days }));
+    .map(([week, { days, activeDays }]) => ({ week, days, activeDays }));
 }
 
 // GET /contrib-graph — pre-merged contribution data from all repos
@@ -241,7 +248,7 @@ router.get("/contrib-graph", async (_req, res) => {
 
 // ── Pre-computed dev stats ─────────────────────────────
 
-const LIVE_REPOS = CONTRIB_REPOS.slice(0, 3);
+const LIVE_REPO_NAMES = CONTRIB_REPOS.slice(0, 3).map(e => e.repo);
 
 let devStatsCache: { data: any; ts: number } | null = null;
 
@@ -257,8 +264,9 @@ async function buildDevStats() {
   const allDays = new Set<string>();
 
   await Promise.all(
-    CONTRIB_REPOS.map(async (repo) => {
-      const isLive = LIVE_REPOS.includes(repo);
+    CONTRIB_REPOS.map(async (entry) => {
+      const repo = entry.repo;
+      const isLive = LIVE_REPO_NAMES.includes(repo);
 
       // Contributors → commit counts
       try {
