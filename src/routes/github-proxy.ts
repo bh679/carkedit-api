@@ -96,6 +96,34 @@ router.get("/repos/:owner/:repo/events", async (req, res) => {
   }
 });
 
+// GET /repos/:owner/:repo/pulls
+router.get("/repos/:owner/:repo/pulls", async (req, res) => {
+  try {
+    const { owner, repo } = req.params;
+    const qs = new URLSearchParams(req.query as Record<string, string>).toString();
+    const url = `${GITHUB_API}/repos/${owner}/${repo}/pulls${qs ? `?${qs}` : ""}`;
+    const ghRes = await fetch(url, { headers: ghHeaders() });
+    forwardRateLimit(ghRes, res);
+    res.status(ghRes.status).json(await ghRes.json());
+  } catch (err) {
+    res.status(502).json({ error: "GitHub proxy error" });
+  }
+});
+
+// GET /repos/:owner/:repo/branches
+router.get("/repos/:owner/:repo/branches", async (req, res) => {
+  try {
+    const { owner, repo } = req.params;
+    const qs = new URLSearchParams(req.query as Record<string, string>).toString();
+    const url = `${GITHUB_API}/repos/${owner}/${repo}/branches${qs ? `?${qs}` : ""}`;
+    const ghRes = await fetch(url, { headers: ghHeaders() });
+    forwardRateLimit(ghRes, res);
+    res.status(ghRes.status).json(await ghRes.json());
+  } catch (err) {
+    res.status(502).json({ error: "GitHub proxy error" });
+  }
+});
+
 // GET /repos/:owner/:repo/contents/* (wildcard path for nested file paths)
 router.get("/repos/:owner/:repo/contents/*", async (req, res) => {
   try {
