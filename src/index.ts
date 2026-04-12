@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { exec } from "node:child_process";
 import https from "node:https";
 import path from "path";
 import fs from "fs";
@@ -209,6 +210,16 @@ const server = defineServer({
         console.error("[CarkedIt API] Secrets health check error:", err);
         res.status(500).json({ error: "Failed to check secrets health" });
       }
+    });
+
+    // Admin-only: restart the API server via PM2
+    app.post("/api/carkedit/server/restart", requireAdmin(), (_req: any, res: any) => {
+      res.json({ status: "ok", message: "Server restarting..." });
+      setTimeout(() => {
+        exec("pm2 restart carkedit-api", (err) => {
+          if (err) console.error("[CarkedIt API] Restart failed:", err.message);
+        });
+      }, 500);
     });
 
     // GitHub API proxy (server-side auth with GITHUB_TOKEN)
