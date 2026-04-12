@@ -305,6 +305,9 @@ export function initDatabase(): void {
   if (!packCols.includes('brand_image_url')) {
     db.exec('ALTER TABLE expansion_packs ADD COLUMN brand_image_url TEXT');
   }
+  if (!packCols.includes('base_cost_usd')) {
+    db.exec('ALTER TABLE expansion_packs ADD COLUMN base_cost_usd REAL NOT NULL DEFAULT 0');
+  }
 
   // Migrate: drop legacy `visibility` column from expansion_packs.
   // The column was never written by any code path (every pack was stuck at

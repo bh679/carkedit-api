@@ -170,6 +170,7 @@ export type PackStatsRow = {
   win_rate: number;
   total_cost_usd: number;
   total_generations: number;
+  base_cost_usd: number;
   created_at: string;
 };
 
@@ -184,6 +185,7 @@ export function listPackStatsAll(): PackStatsRow[] {
       ep.is_official,
       ep.is_dev,
       ep.created_at,
+      ep.base_cost_usd,
       u.display_name as creator_name,
       (SELECT COUNT(*) FROM expansion_cards ec WHERE ec.pack_id = ep.id) as card_count,
       (SELECT COUNT(*) FROM expansion_cards ec WHERE ec.pack_id = ep.id AND ec.deck_type = 'die')  as die_count,
@@ -274,6 +276,16 @@ export function setPackDev(packId: string, isDev: boolean): ExpansionPack | null
   const result = db.prepare(
     "UPDATE expansion_packs SET is_dev = ?, updated_at = datetime('now') WHERE id = ?"
   ).run(isDev ? 1 : 0, packId);
+  if (result.changes === 0) return null;
+  const row = db.prepare('SELECT * FROM expansion_packs WHERE id = ?').get(packId) as ExpansionPack;
+  return normalizePackRow(row as any);
+}
+
+export function setPackBaseCost(packId: string, baseCostUsd: number): ExpansionPack | null {
+  const db = getDb();
+  const result = db.prepare(
+    "UPDATE expansion_packs SET base_cost_usd = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(baseCostUsd, packId);
   if (result.changes === 0) return null;
   const row = db.prepare('SELECT * FROM expansion_packs WHERE id = ?').get(packId) as ExpansionPack;
   return normalizePackRow(row as any);
