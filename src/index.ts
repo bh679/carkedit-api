@@ -10,7 +10,7 @@ import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
 import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev, saveMailingListEntry } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag } from "./db/users.js";
-import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, getPackStats, listPackStatsAll } from "./db/packs.js";
+import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, setPackBaseCost, getPackStats, listPackStatsAll } from "./db/packs.js";
 import { createGenerationLog, listGenerationLog, mergeLogEntries } from "./db/generation-log.js";
 import { optionalAuth, requireAuth, requireAdmin, setFirebaseAvailable, isFirebaseAvailable } from "./middleware/auth.js";
 import { publicWriteLimiter, publicBodyLimit } from "./middleware/rate-limit.js";
@@ -729,6 +729,21 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Set pack dev error:", err);
         res.status(500).json({ error: "Failed to set pack dev" });
+      }
+    });
+
+    app.patch("/api/carkedit/packs/:id/base-cost", requireAdmin(), (req: any, res: any) => {
+      try {
+        const { base_cost_usd } = req.body;
+        if (typeof base_cost_usd !== 'number' || base_cost_usd < 0) {
+          return res.status(400).json({ error: "base_cost_usd (number >= 0) is required" });
+        }
+        const pack = setPackBaseCost(req.params.id, base_cost_usd);
+        if (!pack) return res.status(404).json({ error: "Pack not found" });
+        res.json(pack);
+      } catch (err) {
+        console.error("[CarkedIt API] Set pack base cost error:", err);
+        res.status(500).json({ error: "Failed to set pack base cost" });
       }
     });
 
