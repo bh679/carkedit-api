@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { randomUUID } from "node:crypto";
 import { exec } from "node:child_process";
 import https from "node:https";
@@ -873,6 +874,106 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Cost image-gen error:", err);
         res.status(500).json({ error: "Failed to retrieve image gen costs" });
+      }
+    });
+
+    // ── Financial Dashboard: AWS Cost Explorer ─────────
+    // Projected monthly costs for services in free tier / promotional pricing.
+    // These are the known costs AFTER the promotional period ends.
+    const AWS_PROJECTED_COSTS: Record<string, number> = {
+      "Amazon Lightsail": 3.50,   // smallest Linux instance after 3-month trial
+    };
+
+    app.get("/api/carkedit/costs/aws", requireAdmin(), async (req: any, res: any) => {
+      try {
+        const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
+        const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
+        if (!accessKeyId || !secretAccessKey) {
+          return res.json({ configured: false, message: "AWS credentials not configured" });
+        }
+
+        const awsSdk = await import("@aws-sdk/client-cost-explorer").catch(() => null) as any;
+        if (!awsSdk) {
+          return res.json({ configured: false, message: "AWS SDK not installed — run npm install" });
+        }
+        const region = process.env.AWS_COST_REGION || "us-east-1";
+        const client = new awsSdk.CostExplorerClient({ region, credentials: { accessKeyId, secretAccessKey } });
+
+        const months = Math.min(Math.max(parseInt(req.query.months as string) || 6, 1), 24);
+        const end = new Date();
+        const start = new Date(end.getFullYear(), end.getMonth() - months, 1);
+        const fmt = (d: Date) => d.toISOString().slice(0, 10);
+
+        const cmd = new awsSdk.GetCostAndUsageCommand({
+          TimePeriod: { Start: fmt(start), End: fmt(end) },
+          Granularity: "MONTHLY",
+          Metrics: ["UnblendedCost", "AmortizedCost"],
+          GroupBy: [{ Type: "DIMENSION", Key: "SERVICE" }],
+          Filter: { Tags: { Key: "CarkedIt", Values: [""], MatchOptions: ["EQUALS"] } },
+        });
+        const result = await client.send(cmd);
+
+        const byService: Record<string, { actual: number; amortized: number }> = {};
+        const monthlyData: { month: string; total_usd: number; total_amortized: number; services: Record<string, number> }[] = [];
+
+        for (const period of result.ResultsByTime || []) {
+          const month = (period.TimePeriod?.Start || "").slice(0, 7);
+          const services: Record<string, number> = {};
+          let monthTotal = 0;
+          let monthAmortized = 0;
+          for (const group of period.Groups || []) {
+            const svc = group.Keys?.[0] || "Other";
+            const actual = parseFloat(group.Metrics?.UnblendedCost?.Amount || "0");
+            const amortized = parseFloat(group.Metrics?.AmortizedCost?.Amount || "0");
+            if (actual > 0 || amortized > 0) {
+              services[svc] = actual;
+              if (!byService[svc]) byService[svc] = { actual: 0, amortized: 0 };
+              byService[svc].actual += actual;
+              byService[svc].amortized += amortized;
+              monthTotal += actual;
+              monthAmortized += amortized;
+            }
+          }
+          if (monthTotal > 0 || monthAmortized > 0) {
+            monthlyData.push({ month, total_usd: monthTotal, total_amortized: monthAmortized, services });
+          }
+        }
+
+        const totalActual = Object.values(byService).reduce((s, v) => s + v.actual, 0);
+        const totalAmortized = Object.values(byService).reduce((s, v) => s + v.amortized, 0);
+        const curMonth = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}`;
+        const curMonthEntry = monthlyData.find(m => m.month === curMonth);
+
+        // Calculate projected monthly cost: actual + projected for free-tier services
+        const projectedMonthly = Object.entries(AWS_PROJECTED_COSTS).reduce((sum, [svc, cost]) => {
+          const actualMonthlyCost = curMonthEntry?.services[svc] || 0;
+          // Only add projected cost if actual is below the projected (i.e., still in free tier)
+          return sum + Math.max(cost, actualMonthlyCost);
+        }, curMonthEntry?.total_usd || 0);
+
+        res.json({
+          configured: true,
+          totals: {
+            total_usd: totalActual,
+            total_amortized: totalAmortized,
+            current_month_usd: curMonthEntry?.total_usd || 0,
+            projected_monthly_usd: projectedMonthly,
+          },
+          by_service: Object.entries(byService)
+            .map(([service, costs]) => ({
+              service,
+              total_usd: costs.actual,
+              total_amortized: costs.amortized,
+              projected_monthly: AWS_PROJECTED_COSTS[service] || null,
+            }))
+            .sort((a, b) => b.total_usd - a.total_usd),
+          by_month: monthlyData.sort((a, b) => b.month.localeCompare(a.month)),
+          projected_costs: AWS_PROJECTED_COSTS,
+          fetched_at: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.error("[CarkedIt API] AWS cost fetch error:", err);
+        res.status(500).json({ error: "Failed to fetch AWS costs" });
       }
     });
 
