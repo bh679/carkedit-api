@@ -885,16 +885,19 @@ const server = defineServer({
           return res.json({ configured: false, message: "AWS credentials not configured" });
         }
 
-        const { CostExplorerClient, GetCostAndUsageCommand } = await import("@aws-sdk/client-cost-explorer");
+        const awsSdk = await import("@aws-sdk/client-cost-explorer").catch(() => null) as any;
+        if (!awsSdk) {
+          return res.json({ configured: false, message: "AWS SDK not installed — run npm install" });
+        }
         const region = process.env.AWS_COST_REGION || "us-east-1";
-        const client = new CostExplorerClient({ region, credentials: { accessKeyId, secretAccessKey } });
+        const client = new awsSdk.CostExplorerClient({ region, credentials: { accessKeyId, secretAccessKey } });
 
         const months = Math.min(Math.max(parseInt(req.query.months as string) || 6, 1), 24);
         const end = new Date();
         const start = new Date(end.getFullYear(), end.getMonth() - months, 1);
         const fmt = (d: Date) => d.toISOString().slice(0, 10);
 
-        const cmd = new GetCostAndUsageCommand({
+        const cmd = new awsSdk.GetCostAndUsageCommand({
           TimePeriod: { Start: fmt(start), End: fmt(end) },
           Granularity: "MONTHLY",
           Metrics: ["UnblendedCost"],
