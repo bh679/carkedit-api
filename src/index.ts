@@ -908,6 +908,7 @@ const server = defineServer({
           Granularity: "MONTHLY",
           Metrics: ["UnblendedCost", "AmortizedCost"],
           GroupBy: [{ Type: "DIMENSION", Key: "SERVICE" }],
+          Filter: { Tags: { Key: "CarkedIt", MatchOptions: ["PRESENT"] } },
         });
         const result = await client.send(cmd);
 
