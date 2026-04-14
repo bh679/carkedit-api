@@ -782,35 +782,43 @@ const server = defineServer({
     });
 
     // ── Financial Dashboard: Cost Summary ──────────────
+    // Estimate cost for entries without cost_usd using default 1MP pricing
+    const COST_ESTIMATE_SQL = `COALESCE(cost_usd, CASE provider
+      WHEN 'flux-2-pro' THEN 0.030 WHEN 'flux-2-max' THEN 0.070
+      WHEN 'flux-2-klein-9b' THEN 0.015 WHEN 'flux-2-klein-4b' THEN 0.014
+      WHEN 'leonardo-phoenix-1' THEN 0.020 WHEN 'leonardo-phoenix-1.0' THEN 0.020
+      ELSE 0.030 END)`;
+
     app.get("/api/carkedit/costs/summary", requireAdmin(), (req: any, res: any) => {
       try {
         const db = getDb();
         const months = Math.min(Math.max(parseInt(req.query.months as string) || 12, 1), 60);
 
-        // All-time totals
+        // All-time totals (includes estimated costs for untracked entries)
         const allTime = db.prepare(
-          `SELECT COALESCE(SUM(cost_usd), 0) as total_usd, COUNT(*) as count
-           FROM generation_log WHERE cost_usd IS NOT NULL`
+          `SELECT COALESCE(SUM(${COST_ESTIMATE_SQL}), 0) as total_usd, COUNT(*) as count,
+                  SUM(CASE WHEN cost_usd IS NULL THEN 1 ELSE 0 END) as estimated_count
+           FROM generation_log`
         ).get() as any;
 
-        // Current month
+        // Current & previous month
         const now = new Date();
         const curMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
         const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
         const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
 
         const monthTotal = db.prepare(
-          `SELECT COALESCE(SUM(cost_usd), 0) as total_usd
-           FROM generation_log
-           WHERE cost_usd IS NOT NULL AND strftime('%Y-%m', created_at) = ?`
+          `SELECT COALESCE(SUM(${COST_ESTIMATE_SQL}), 0) as total_usd
+           FROM generation_log WHERE strftime('%Y-%m', created_at) = ?`
         );
         const curMonthData = monthTotal.get(curMonth) as any;
         const prevMonthData = monthTotal.get(prevMonth) as any;
 
         // By provider (all-time)
         const byProvider = db.prepare(
-          `SELECT provider, COALESCE(SUM(cost_usd), 0) as total_usd, COUNT(*) as count
-           FROM generation_log WHERE cost_usd IS NOT NULL
+          `SELECT provider, COALESCE(SUM(${COST_ESTIMATE_SQL}), 0) as total_usd, COUNT(*) as count,
+                  SUM(CASE WHEN cost_usd IS NULL THEN 1 ELSE 0 END) as estimated_count
+           FROM generation_log
            GROUP BY provider ORDER BY total_usd DESC`
         ).all() as any[];
 
@@ -819,9 +827,9 @@ const server = defineServer({
         const cutoffStr = cutoff.toISOString().slice(0, 10);
         const byMonthRows = db.prepare(
           `SELECT provider, strftime('%Y-%m', created_at) as month,
-                  COALESCE(SUM(cost_usd), 0) as total_usd, COUNT(*) as count
+                  COALESCE(SUM(${COST_ESTIMATE_SQL}), 0) as total_usd, COUNT(*) as count
            FROM generation_log
-           WHERE cost_usd IS NOT NULL AND created_at >= ?
+           WHERE created_at >= ?
            GROUP BY provider, month ORDER BY month DESC, total_usd DESC`
         ).all(cutoffStr) as any[];
 
@@ -838,6 +846,7 @@ const server = defineServer({
           totals: {
             all_time_usd: allTime.total_usd,
             all_time_count: allTime.count,
+            estimated_count: allTime.estimated_count,
             current_month_usd: curMonthData.total_usd,
             previous_month_usd: prevMonthData.total_usd,
           },
@@ -860,8 +869,7 @@ const server = defineServer({
         const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 50, 1), 200);
         const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
         const entries = listGenerationLog({ limit, offset });
-        const costEntries = entries.filter((e: any) => e.cost_usd != null);
-        res.json({ entries: costEntries, total_shown: costEntries.length });
+        res.json({ entries, total_shown: entries.length });
       } catch (err) {
         console.error("[CarkedIt API] Cost image-gen error:", err);
         res.status(500).json({ error: "Failed to retrieve image gen costs" });
