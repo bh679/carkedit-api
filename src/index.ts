@@ -909,7 +909,7 @@ const server = defineServer({
           Granularity: "MONTHLY",
           Metrics: ["UnblendedCost", "AmortizedCost"],
           GroupBy: [{ Type: "DIMENSION", Key: "SERVICE" }],
-          Filter: { Tags: { Key: "CarkedIt", MatchOptions: ["PRESENT"] } },
+          Filter: { Tags: { Key: "CarkedIt", Values: [""], MatchOptions: ["EQUALS"] } },
         });
         const result = await client.send(cmd);
 
