@@ -18,6 +18,7 @@ import { publicWriteLimiter, publicBodyLimit } from "./middleware/rate-limit.js"
 import type { GameResult, IssueReport } from "./db/types.js";
 import { listProviders, getProvider, buildPrompt } from "./services/image-gen/index.js";
 import { DEFAULT_STYLE } from "./services/image-gen/default-style.js";
+import { CostExplorerClient, GetCostAndUsageCommand } from "@aws-sdk/client-cost-explorer";
 import githubProxyRouter from "./routes/github-proxy.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -873,6 +874,65 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Cost image-gen error:", err);
         res.status(500).json({ error: "Failed to retrieve image gen costs" });
+      }
+    });
+
+    app.post("/api/carkedit/costs/fetch/aws", requireAdmin(), async (req: any, res: any) => {
+      const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
+      const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
+      if (!accessKeyId || !secretAccessKey) {
+        return res.status(503).json({ error: "AWS credentials not configured" });
+      }
+
+      try {
+        const months = Math.min(Math.max(parseInt(req.body?.months ?? req.query.months) || 6, 1), 12);
+        const accountId = process.env.AWS_ACCOUNT_ID || '';
+
+        // Build date range: first day of (today - months) to today
+        const now = new Date();
+        const end = now.toISOString().slice(0, 10);
+        const startDate = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
+        const start = startDate.toISOString().slice(0, 10);
+
+        const client = new CostExplorerClient({
+          region: process.env.AWS_COST_REGION || 'us-east-1',
+          credentials: { accessKeyId, secretAccessKey },
+        });
+
+        const filter = accountId
+          ? { Dimensions: { Key: 'LINKED_ACCOUNT', Values: [accountId] } }
+          : undefined;
+
+        const command = new GetCostAndUsageCommand({
+          TimePeriod: { Start: start, End: end },
+          Granularity: 'MONTHLY',
+          Metrics: ['UnblendedCost'],
+          GroupBy: [{ Type: 'DIMENSION', Key: 'SERVICE' }],
+          ...(filter && { Filter: filter }),
+        });
+
+        const data = await client.send(command);
+
+        const result = (data.ResultsByTime || []).map((period: any) => {
+          const services: Record<string, number> = {};
+          let total = 0;
+          for (const group of period.Groups || []) {
+            const name = group.Keys?.[0] ?? 'Unknown';
+            const amount = parseFloat(group.Metrics?.UnblendedCost?.Amount ?? '0');
+            services[name] = amount;
+            total += amount;
+          }
+          return {
+            month: period.TimePeriod?.Start?.slice(0, 7),
+            total_usd: Math.round(total * 10000) / 10000,
+            services,
+          };
+        });
+
+        res.json({ months: result, fetched_at: new Date().toISOString() });
+      } catch (err: any) {
+        console.error("[CarkedIt API] AWS cost fetch error:", err);
+        res.status(500).json({ error: err.message || "Failed to fetch AWS costs" });
       }
     });
 

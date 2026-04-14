@@ -1,6 +1,6 @@
 {
   "name": "carkedit-api",
-  "version": "0.01.0066",
+  "version": "0.01.0067",
   "description": "CarkedIt multiplayer card game server",
   "type": "module",
   "main": "src/index.ts",
@@ -33,6 +33,7 @@
     }
   },
   "dependencies": {
+    "@aws-sdk/client-cost-explorer": "^3.1030.0",
     "@colyseus/ws-transport": "^0.17.0",
     "@types/better-sqlite3": "^7.6.8",
     "better-sqlite3": "^9.6.0",
