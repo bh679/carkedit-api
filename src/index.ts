@@ -781,6 +781,93 @@ const server = defineServer({
       }
     });
 
+    // ── Financial Dashboard: Cost Summary ──────────────
+    app.get("/api/carkedit/costs/summary", requireAdmin(), (req: any, res: any) => {
+      try {
+        const db = getDb();
+        const months = Math.min(Math.max(parseInt(req.query.months as string) || 12, 1), 60);
+
+        // All-time totals
+        const allTime = db.prepare(
+          `SELECT COALESCE(SUM(cost_usd), 0) as total_usd, COUNT(*) as count
+           FROM generation_log WHERE cost_usd IS NOT NULL`
+        ).get() as any;
+
+        // Current month
+        const now = new Date();
+        const curMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
+
+        const monthTotal = db.prepare(
+          `SELECT COALESCE(SUM(cost_usd), 0) as total_usd
+           FROM generation_log
+           WHERE cost_usd IS NOT NULL AND strftime('%Y-%m', created_at) = ?`
+        );
+        const curMonthData = monthTotal.get(curMonth) as any;
+        const prevMonthData = monthTotal.get(prevMonth) as any;
+
+        // By provider (all-time)
+        const byProvider = db.prepare(
+          `SELECT provider, COALESCE(SUM(cost_usd), 0) as total_usd, COUNT(*) as count
+           FROM generation_log WHERE cost_usd IS NOT NULL
+           GROUP BY provider ORDER BY total_usd DESC`
+        ).all() as any[];
+
+        // By month + provider (last N months)
+        const cutoff = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
+        const cutoffStr = cutoff.toISOString().slice(0, 10);
+        const byMonthRows = db.prepare(
+          `SELECT provider, strftime('%Y-%m', created_at) as month,
+                  COALESCE(SUM(cost_usd), 0) as total_usd, COUNT(*) as count
+           FROM generation_log
+           WHERE cost_usd IS NOT NULL AND created_at >= ?
+           GROUP BY provider, month ORDER BY month DESC, total_usd DESC`
+        ).all(cutoffStr) as any[];
+
+        // Group by month
+        const byMonth: Record<string, { total_usd: number; providers: Record<string, number>; count: number }> = {};
+        for (const row of byMonthRows) {
+          if (!byMonth[row.month]) byMonth[row.month] = { total_usd: 0, providers: {}, count: 0 };
+          byMonth[row.month].total_usd += row.total_usd;
+          byMonth[row.month].count += row.count;
+          byMonth[row.month].providers[row.provider] = row.total_usd;
+        }
+
+        res.json({
+          totals: {
+            all_time_usd: allTime.total_usd,
+            all_time_count: allTime.count,
+            current_month_usd: curMonthData.total_usd,
+            previous_month_usd: prevMonthData.total_usd,
+          },
+          by_provider: byProvider,
+          by_month: Object.entries(byMonth).map(([month, data]) => ({
+            month,
+            total_usd: data.total_usd,
+            count: data.count,
+            providers: data.providers,
+          })),
+        });
+      } catch (err) {
+        console.error("[CarkedIt API] Cost summary error:", err);
+        res.status(500).json({ error: "Failed to retrieve cost summary" });
+      }
+    });
+
+    app.get("/api/carkedit/costs/image-gen", requireAdmin(), (req: any, res: any) => {
+      try {
+        const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 50, 1), 200);
+        const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
+        const entries = listGenerationLog({ limit, offset });
+        const costEntries = entries.filter((e: any) => e.cost_usd != null);
+        res.json({ entries: costEntries, total_shown: costEntries.length });
+      } catch (err) {
+        console.error("[CarkedIt API] Cost image-gen error:", err);
+        res.status(500).json({ error: "Failed to retrieve image gen costs" });
+      }
+    });
+
     app.get("/api/carkedit/packs/:id", (req: any, res: any) => {
       try {
         const pack = getPackById(req.params.id, req.localUser?.id);
