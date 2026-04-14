@@ -876,6 +876,70 @@ const server = defineServer({
       }
     });
 
+    // ── Financial Dashboard: AWS Cost Explorer ─────────
+    app.get("/api/carkedit/costs/aws", requireAdmin(), async (req: any, res: any) => {
+      try {
+        const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
+        const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
+        if (!accessKeyId || !secretAccessKey) {
+          return res.json({ configured: false, message: "AWS credentials not configured" });
+        }
+
+        const { CostExplorerClient, GetCostAndUsageCommand } = await import("@aws-sdk/client-cost-explorer");
+        const region = process.env.AWS_COST_REGION || "us-east-1";
+        const client = new CostExplorerClient({ region, credentials: { accessKeyId, secretAccessKey } });
+
+        const months = Math.min(Math.max(parseInt(req.query.months as string) || 6, 1), 24);
+        const end = new Date();
+        const start = new Date(end.getFullYear(), end.getMonth() - months, 1);
+        const fmt = (d: Date) => d.toISOString().slice(0, 10);
+
+        const cmd = new GetCostAndUsageCommand({
+          TimePeriod: { Start: fmt(start), End: fmt(end) },
+          Granularity: "MONTHLY",
+          Metrics: ["UnblendedCost"],
+          GroupBy: [{ Type: "DIMENSION", Key: "SERVICE" }],
+        });
+        const result = await client.send(cmd);
+
+        const byService: Record<string, number> = {};
+        const monthlyData: { month: string; total_usd: number; services: Record<string, number> }[] = [];
+
+        for (const period of result.ResultsByTime || []) {
+          const month = (period.TimePeriod?.Start || "").slice(0, 7);
+          const services: Record<string, number> = {};
+          let monthTotal = 0;
+          for (const group of period.Groups || []) {
+            const svc = group.Keys?.[0] || "Other";
+            const amt = parseFloat(group.Metrics?.UnblendedCost?.Amount || "0");
+            if (amt > 0) {
+              services[svc] = amt;
+              byService[svc] = (byService[svc] || 0) + amt;
+              monthTotal += amt;
+            }
+          }
+          if (monthTotal > 0) monthlyData.push({ month, total_usd: monthTotal, services });
+        }
+
+        const totalUsd = Object.values(byService).reduce((s, v) => s + v, 0);
+        const curMonth = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}`;
+        const curMonthEntry = monthlyData.find(m => m.month === curMonth);
+
+        res.json({
+          configured: true,
+          totals: { total_usd: totalUsd, current_month_usd: curMonthEntry?.total_usd || 0 },
+          by_service: Object.entries(byService)
+            .map(([service, total_usd]) => ({ service, total_usd }))
+            .sort((a, b) => b.total_usd - a.total_usd),
+          by_month: monthlyData.sort((a, b) => b.month.localeCompare(a.month)),
+          fetched_at: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.error("[CarkedIt API] AWS cost fetch error:", err);
+        res.status(500).json({ error: "Failed to fetch AWS costs" });
+      }
+    });
+
     app.get("/api/carkedit/packs/:id", (req: any, res: any) => {
       try {
         const pack = getPackById(req.params.id, req.localUser?.id);

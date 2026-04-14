@@ -1,6 +1,6 @@
 {
   "name": "carkedit-api",
-  "version": "0.01.0066",
+  "version": "0.01.0067",
   "description": "CarkedIt multiplayer card game server",
   "type": "module",
   "main": "src/index.ts",
@@ -41,6 +41,7 @@
     "express-rate-limit": "^8.3.2",
     "firebase-admin": "^13.7.0",
     "helmet": "^8.1.0",
+    "@aws-sdk/client-cost-explorer": "^3.800.0",
     "multer": "^2.1.1"
   },
   "license": "BUSL-1.1",
