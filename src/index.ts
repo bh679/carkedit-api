@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { randomUUID } from "node:crypto";
 import { exec } from "node:child_process";
 import https from "node:https";
