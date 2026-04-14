@@ -214,6 +214,23 @@ export interface GenerationLogEntry {
   created_at: string;
 }
 
+/** Unified cost entry — remote reports, AWS/Cloudflare, manual, etc. */
+export interface CostEntry {
+  id: string;
+  service: string;
+  category: string;
+  description: string;
+  amount_usd: number;
+  period_start: string;
+  period_end: string;
+  environment: string;
+  source: string;
+  source_ref: string | null;
+  entered_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SurveyResponse {
   id: string;
   created_at: string;

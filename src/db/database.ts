@@ -221,6 +221,26 @@ export function initDatabase(): void {
     CREATE INDEX IF NOT EXISTS idx_gen_log_created ON generation_log(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_gen_log_creator ON generation_log(creator_id);
 
+    -- Unified cost storage for all sources: remote environment reports,
+    -- AWS/Cloudflare API data, manual entries, GitHub Actions, etc.
+    CREATE TABLE IF NOT EXISTS cost_entries (
+      id TEXT PRIMARY KEY,
+      service TEXT NOT NULL,
+      category TEXT NOT NULL,
+      description TEXT NOT NULL,
+      amount_usd REAL NOT NULL,
+      period_start TEXT NOT NULL,
+      period_end TEXT NOT NULL,
+      environment TEXT NOT NULL DEFAULT 'production',
+      source TEXT NOT NULL DEFAULT 'manual',
+      source_ref TEXT UNIQUE,
+      entered_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_cost_entries_service ON cost_entries(service);
+    CREATE INDEX IF NOT EXISTS idx_cost_entries_period ON cost_entries(period_start, period_end);
+
     CREATE TABLE IF NOT EXISTS mailing_list (
       id TEXT PRIMARY KEY,
       email TEXT NOT NULL,
