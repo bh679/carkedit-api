@@ -20,6 +20,7 @@ import type { GameResult, IssueReport } from "./db/types.js";
 import { listProviders, getProvider, buildPrompt } from "./services/image-gen/index.js";
 import { DEFAULT_STYLE } from "./services/image-gen/default-style.js";
 import githubProxyRouter from "./routes/github-proxy.js";
+import branchGraphRouter from "./routes/branch-graph.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "4500", 10);
@@ -225,6 +226,9 @@ const server = defineServer({
 
     // GitHub API proxy (server-side auth with GITHUB_TOKEN)
     app.use("/api/carkedit/github", githubProxyRouter);
+
+    // Branch graph API (commit topology for branch-manager visualization)
+    app.use("/api/carkedit/branches", branchGraphRouter);
 
     app.get("/api/carkedit/version", (_req: any, res: any) => {
       const pkgPath = path.join(__dirname, "../package.json");

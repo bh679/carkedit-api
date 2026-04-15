@@ -1,6 +1,6 @@
 {
   "name": "carkedit-api",
-  "version": "0.01.0072",
+  "version": "0.01.0073",
   "description": "CarkedIt multiplayer card game server",
   "type": "module",
   "main": "src/index.ts",
@@ -33,17 +33,18 @@
     }
   },
   "dependencies": {
+    "@aws-sdk/client-cost-explorer": "^3.800.0",
     "@colyseus/ws-transport": "^0.17.0",
     "@types/better-sqlite3": "^7.6.8",
     "better-sqlite3": "^9.6.0",
-    "dotenv": "^17.3.1",
     "colyseus": "^0.17.0",
+    "dotenv": "^17.3.1",
     "express": "^4.22.1",
     "express-rate-limit": "^8.3.2",
     "firebase-admin": "^13.7.0",
     "helmet": "^8.1.0",
-    "@aws-sdk/client-cost-explorer": "^3.800.0",
-    "multer": "^2.1.1"
+    "multer": "^2.1.1",
+    "simple-git": "^3.36.0"
   },
   "license": "BUSL-1.1",
   "devDependencies": {
