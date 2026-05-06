@@ -10,15 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger production deploy webhook
-        env:
-          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN_PROD }}
-          REF_NAME: ${{ github.ref_name }}
         run: |
-          echo "Deploying tag: $REF_NAME"
+          echo "Deploying tag: ${{ github.ref_name }}"
           RESPONSE=$(curl -s -w "\n%{http_code}" \
-            --data-urlencode "token=$DEPLOY_TOKEN" \
-            --data-urlencode "ref=$REF_NAME" \
-            -G "https://play.carkedit.com/.deploy/carkedit-api.php")
+            "https://play.carkedit.com/carkedit-api/deploy.php?token=${{ secrets.DEPLOY_TOKEN_PROD }}&branch=${{ github.ref_name }}")
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
           BODY=$(echo "$RESPONSE" | head -n -1)
           echo "HTTP Status: $HTTP_CODE"
