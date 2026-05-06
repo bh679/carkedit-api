@@ -110,10 +110,10 @@ const server = defineServer({
     fs.mkdirSync(brandsDir, { recursive: true });
     fs.mkdirSync(cardImagesDir, { recursive: true });
     app.use('/uploads', express.static(uploadsDir));
-    // Also mount uploads under the /api/carkedit/* prefix that Apache
-    // on brennan.games already proxies. The production Apache host
-    // doesn't have a ProxyPass rule for `/uploads/*`, so image URLs
-    // stored as `/uploads/card-images/...` return 404 in the browser.
+    // Also mount uploads under the /api/carkedit/* prefix that the
+    // upstream Apache vhost already proxies. Apache doesn't have a
+    // ProxyPass rule for `/uploads/*`, so image URLs stored as
+    // `/uploads/card-images/...` return 404 in the browser.
     // Serving the same directory under `/api/carkedit/uploads/*`
     // piggy-backs on the existing API proxy. The legacy `/uploads`
     // mount above stays for localhost/backwards compat.
@@ -1412,8 +1412,8 @@ const server = defineServer({
           const filepath = path.join(cardImagesDir, filename);
           fs.writeFileSync(filepath, buffer);
           // Served via `app.use('/api/carkedit/uploads', …)` above so
-          // the image URL flows through brennan.games's existing
-          // /api/carkedit/* Apache proxy.
+          // the image URL flows through the upstream Apache vhost's
+          // existing /api/carkedit/* proxy.
           localImageUrl = `/api/carkedit/uploads/card-images/${filename}`;
 
           // Normalise Split options to a JSON string if provided
@@ -1700,7 +1700,7 @@ const server = defineServer({
 
           // Best-effort cleanup of the previous image for this card.
           // Served via `app.use('/api/carkedit/uploads', …)` so the URL
-          // flows through brennan.games's /api/carkedit/* Apache proxy.
+          // flows through the upstream Apache vhost's /api/carkedit/* proxy.
           const relUrl = `/api/carkedit/uploads/card-images/${filename}`;
           const updates: any = { image_url: relUrl };
           if (text_position) updates.text_position = text_position;
@@ -1727,7 +1727,7 @@ console.log("[CarkedIt API] Database initialized");
 // One-time idempotent migration: rewrite any historical image_url /
 // image_url_b values that start with `/uploads/` to `/api/carkedit/uploads/`.
 // This unsticks rows written by v0.01.0037 and earlier, which stored
-// origin-relative upload paths that Apache on brennan.games couldn't
+// origin-relative upload paths that the upstream Apache vhost couldn't
 // resolve. Idempotent because after the rewrite, `LIKE '/uploads/%'`
 // no longer matches the prefixed rows.
 try {
