@@ -11,7 +11,7 @@ jobs:
       - name: Trigger dev deploy webhook
         run: |
           RESPONSE=$(curl -s -w "\n%{http_code}" \
-            "https://dev.play.carkedit.com/.deploy/carkedit-api.php?token=${{ secrets.DEPLOY_TOKEN_DEV }}&branch=${{ github.ref_name }}")
+            "https://dev.play.carkedit.com/carkedit-api/deploy.php?token=${{ secrets.DEPLOY_TOKEN_DEV }}&branch=${{ github.ref_name }}")
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
           BODY=$(echo "$RESPONSE" | head -n -1)
           echo "Response: $BODY"
