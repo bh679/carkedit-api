@@ -75,6 +75,25 @@ export function validateEnum<T extends string>(
 }
 
 /**
+ * Safe-coerce one untrusted player object into a row ready for the
+ * `game_players` table. player_name and score are NOT NULL in the
+ * schema, so this defaults missing/non-finite values rather than
+ * letting them reach SQLite.
+ */
+export function coerceGamePlayer(
+  p: { name?: unknown; score?: unknown },
+  rank: number,
+): { player_name: string; score: number; rank: number } {
+  const player_name = typeof p?.name === 'string' && p.name.length > 0
+    ? p.name
+    : 'Unknown';
+  const score = typeof p?.score === 'number' && Number.isFinite(p.score)
+    ? p.score
+    : 0;
+  return { player_name, score, rank };
+}
+
+/**
  * Safe-coerce the top entry of a score-sorted player array into the
  * fields the `games` table requires (winner_name, winner_score, both
  * NOT NULL). Mirrors the precedent already in use in
@@ -84,12 +103,6 @@ export function validateEnum<T extends string>(
 export function coerceWinner(
   sortedPlayers: { name?: unknown; score?: unknown }[],
 ): { winner_name: string; winner_score: number } {
-  const top = sortedPlayers[0];
-  const name = typeof top?.name === 'string' && top.name.length > 0
-    ? top.name
-    : 'Unknown';
-  const score = typeof top?.score === 'number' && Number.isFinite(top.score)
-    ? top.score
-    : 0;
-  return { winner_name: name, winner_score: score };
+  const { player_name, score } = coerceGamePlayer(sortedPlayers[0] ?? {}, 1);
+  return { winner_name: player_name, winner_score: score };
 }

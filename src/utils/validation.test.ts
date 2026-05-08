@@ -3,6 +3,7 @@ import {
   validateOptionalString,
   validateEnum,
   coerceWinner,
+  coerceGamePlayer,
 } from './validation.js';
 
 describe('validateRequiredString', () => {
@@ -154,6 +155,47 @@ describe('coerceWinner', () => {
     expect(coerceWinner([{ name: 'Alice', score: 7 }])).toEqual({
       winner_name: 'Alice',
       winner_score: 7,
+    });
+  });
+});
+
+describe('coerceGamePlayer', () => {
+  it('returns supplied values on the happy path', () => {
+    expect(coerceGamePlayer({ name: 'Alice', score: 7 }, 1)).toEqual({
+      player_name: 'Alice',
+      score: 7,
+      rank: 1,
+    });
+  });
+
+  it('defaults score to 0 when missing or non-finite', () => {
+    expect(coerceGamePlayer({ name: 'Alice' }, 1)).toEqual({
+      player_name: 'Alice',
+      score: 0,
+      rank: 1,
+    });
+    expect(coerceGamePlayer({ name: 'Alice', score: NaN }, 2)).toEqual({
+      player_name: 'Alice',
+      score: 0,
+      rank: 2,
+    });
+    expect(coerceGamePlayer({ name: 'Alice', score: '7' }, 3)).toEqual({
+      player_name: 'Alice',
+      score: 0,
+      rank: 3,
+    });
+  });
+
+  it('defaults name to Unknown when missing or empty', () => {
+    expect(coerceGamePlayer({ score: 5 }, 1)).toEqual({
+      player_name: 'Unknown',
+      score: 5,
+      rank: 1,
+    });
+    expect(coerceGamePlayer({ name: '', score: 5 }, 1)).toEqual({
+      player_name: 'Unknown',
+      score: 5,
+      rank: 1,
     });
   });
 });

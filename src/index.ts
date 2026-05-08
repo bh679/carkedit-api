@@ -20,7 +20,7 @@ import type { GameResult, IssueReport } from "./db/types.js";
 import { listProviders, getProvider, buildPrompt } from "./services/image-gen/index.js";
 import { DEFAULT_STYLE } from "./services/image-gen/default-style.js";
 import githubProxyRouter from "./routes/github-proxy.js";
-import { validateOptionalString, validateEnum, coerceWinner } from "./utils/validation.js";
+import { validateOptionalString, validateEnum, coerceWinner, coerceGamePlayer } from "./utils/validation.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "4500", 10);
@@ -266,7 +266,8 @@ const server = defineServer({
         const pkgPath = path.join(__dirname, "../package.json");
         const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
 
-        const sorted = [...players].sort((a: any, b: any) => b.score - a.score);
+        const scoreOf = (p: any) => (typeof p?.score === 'number' && Number.isFinite(p.score) ? p.score : 0);
+        const sorted = [...players].sort((a: any, b: any) => scoreOf(b) - scoreOf(a));
         const { winner_name, winner_score } = coerceWinner(sorted);
         const result: GameResult = {
           id: randomUUID(),
@@ -285,11 +286,7 @@ const server = defineServer({
           api_version: pkg.version,
           client_version: clientVersion,
           settings_json: settings ? JSON.stringify(settings) : undefined,
-          players: sorted.map((p: any, i: number) => ({
-            player_name: p.name,
-            score: p.score,
-            rank: i + 1,
-          })),
+          players: sorted.map((p: any, i: number) => coerceGamePlayer(p, i + 1)),
         };
 
         const id = saveGameResult(result);
