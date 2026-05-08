@@ -20,6 +20,7 @@ import type { GameResult, IssueReport } from "./db/types.js";
 import { listProviders, getProvider, buildPrompt } from "./services/image-gen/index.js";
 import { DEFAULT_STYLE } from "./services/image-gen/default-style.js";
 import githubProxyRouter from "./routes/github-proxy.js";
+import { validateOptionalString, validateEnum, coerceWinner, coerceGamePlayer } from "./utils/validation.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "4500", 10);
@@ -265,7 +266,9 @@ const server = defineServer({
         const pkgPath = path.join(__dirname, "../package.json");
         const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
 
-        const sorted = [...players].sort((a: any, b: any) => b.score - a.score);
+        const scoreOf = (p: any) => (typeof p?.score === 'number' && Number.isFinite(p.score) ? p.score : 0);
+        const sorted = [...players].sort((a: any, b: any) => scoreOf(b) - scoreOf(a));
+        const { winner_name, winner_score } = coerceWinner(sorted);
         const result: GameResult = {
           id: randomUUID(),
           started_at: startedAt,
@@ -274,8 +277,8 @@ const server = defineServer({
           host_name: hostName,
           rounds,
           player_count: players.length,
-          winner_name: sorted[0].name,
-          winner_score: sorted[0].score,
+          winner_name,
+          winner_score,
           status: status || "finished",
           live_status: "completed",
           has_error: false,
@@ -283,11 +286,7 @@ const server = defineServer({
           api_version: pkg.version,
           client_version: clientVersion,
           settings_json: settings ? JSON.stringify(settings) : undefined,
-          players: sorted.map((p: any, i: number) => ({
-            player_name: p.name,
-            score: p.score,
-            rank: i + 1,
-          })),
+          players: sorted.map((p: any, i: number) => coerceGamePlayer(p, i + 1)),
         };
 
         const id = saveGameResult(result);
@@ -604,7 +603,9 @@ const server = defineServer({
           return res.status(403).json({ error: "Cannot update another user's profile" });
         }
         const { display_name, birth_month, birth_day } = req.body;
-        const user = updateUserProfile(req.params.id, { display_name, birth_month, birth_day });
+        const nameCheck = validateOptionalString(display_name, 'display_name');
+        if (!nameCheck.ok) return res.status(400).json({ error: nameCheck.error });
+        const user = updateUserProfile(req.params.id, { display_name: nameCheck.value, birth_month, birth_day });
         res.json(user);
       } catch (err) {
         console.error("[CarkedIt API] Update user error:", err);
@@ -996,7 +997,22 @@ const server = defineServer({
         if (req.body && 'brand_image_url' in req.body && req.body.brand_image_url !== null) {
           return res.status(400).json({ error: "brand_image_url can only be set via POST /packs/:id/brand" });
         }
-        const pack = updatePack(req.params.id, req.body);
+
+        const titleCheck = validateOptionalString(req.body?.title, 'title');
+        if (!titleCheck.ok) return res.status(400).json({ error: titleCheck.error });
+        const statusCheck = validateEnum(req.body?.status, 'status', ['draft', 'published'] as const);
+        if (!statusCheck.ok) return res.status(400).json({ error: statusCheck.error });
+
+        // Build a sanitized payload: only forward fields we explicitly accept,
+        // so future req.body keys can't reach the DB without going through validation.
+        const updates: Parameters<typeof updatePack>[1] = {};
+        if (titleCheck.value !== undefined) updates.title = titleCheck.value;
+        if (statusCheck.value !== undefined) updates.status = statusCheck.value;
+        if (typeof req.body?.description === 'string') updates.description = req.body.description;
+        if (req.body && 'featured_card_id' in req.body) updates.featured_card_id = req.body.featured_card_id;
+        if (req.body && 'brand_image_url' in req.body) updates.brand_image_url = req.body.brand_image_url;
+
+        const pack = updatePack(req.params.id, updates);
         if (!pack) return res.status(404).json({ error: "Pack not found" });
         res.json(pack);
       } catch (err: any) {
