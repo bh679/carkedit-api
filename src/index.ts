@@ -20,6 +20,7 @@ import type { GameResult, IssueReport } from "./db/types.js";
 import { listProviders, getProvider, buildPrompt } from "./services/image-gen/index.js";
 import { DEFAULT_STYLE } from "./services/image-gen/default-style.js";
 import githubProxyRouter from "./routes/github-proxy.js";
+import { validateOptionalString, validateEnum, coerceWinner } from "./utils/validation.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "4500", 10);
@@ -266,6 +267,7 @@ const server = defineServer({
         const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
 
         const sorted = [...players].sort((a: any, b: any) => b.score - a.score);
+        const { winner_name, winner_score } = coerceWinner(sorted);
         const result: GameResult = {
           id: randomUUID(),
           started_at: startedAt,
@@ -274,8 +276,8 @@ const server = defineServer({
           host_name: hostName,
           rounds,
           player_count: players.length,
-          winner_name: sorted[0].name,
-          winner_score: sorted[0].score,
+          winner_name,
+          winner_score,
           status: status || "finished",
           live_status: "completed",
           has_error: false,
