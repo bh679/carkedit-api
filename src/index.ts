@@ -20,6 +20,7 @@ import type { GameResult, IssueReport } from "./db/types.js";
 import { listProviders, getProvider, buildPrompt } from "./services/image-gen/index.js";
 import { DEFAULT_STYLE } from "./services/image-gen/default-style.js";
 import githubProxyRouter from "./routes/github-proxy.js";
+import adminDeployTokenRouter from "./routes/admin-deploy-token.js";
 import { validateOptionalString, validateEnum, coerceWinner, coerceGamePlayer } from "./utils/validation.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -226,6 +227,9 @@ const server = defineServer({
 
     // GitHub API proxy (server-side auth with GITHUB_TOKEN)
     app.use("/api/carkedit/github", githubProxyRouter);
+
+    // Admin: deploy-token bridge (consumed by carkedit-online deploy host page)
+    app.use("/api/admin/deploy-token", adminDeployTokenRouter);
 
     app.get("/api/carkedit/version", (_req: any, res: any) => {
       const pkgPath = path.join(__dirname, "../package.json");
