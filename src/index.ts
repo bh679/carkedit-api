@@ -606,7 +606,9 @@ const server = defineServer({
           return res.status(403).json({ error: "Cannot update another user's profile" });
         }
         const { display_name, birth_month, birth_day } = req.body;
-        const user = updateUserProfile(req.params.id, { display_name, birth_month, birth_day });
+        const nameCheck = validateOptionalString(display_name, 'display_name');
+        if (!nameCheck.ok) return res.status(400).json({ error: nameCheck.error });
+        const user = updateUserProfile(req.params.id, { display_name: nameCheck.value, birth_month, birth_day });
         res.json(user);
       } catch (err) {
         console.error("[CarkedIt API] Update user error:", err);
