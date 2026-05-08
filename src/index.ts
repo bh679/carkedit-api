@@ -1000,7 +1000,22 @@ const server = defineServer({
         if (req.body && 'brand_image_url' in req.body && req.body.brand_image_url !== null) {
           return res.status(400).json({ error: "brand_image_url can only be set via POST /packs/:id/brand" });
         }
-        const pack = updatePack(req.params.id, req.body);
+
+        const titleCheck = validateOptionalString(req.body?.title, 'title');
+        if (!titleCheck.ok) return res.status(400).json({ error: titleCheck.error });
+        const statusCheck = validateEnum(req.body?.status, 'status', ['draft', 'published'] as const);
+        if (!statusCheck.ok) return res.status(400).json({ error: statusCheck.error });
+
+        // Build a sanitized payload: only forward fields we explicitly accept,
+        // so future req.body keys can't reach the DB without going through validation.
+        const updates: Parameters<typeof updatePack>[1] = {};
+        if (titleCheck.value !== undefined) updates.title = titleCheck.value;
+        if (statusCheck.value !== undefined) updates.status = statusCheck.value;
+        if (typeof req.body?.description === 'string') updates.description = req.body.description;
+        if (req.body && 'featured_card_id' in req.body) updates.featured_card_id = req.body.featured_card_id;
+        if (req.body && 'brand_image_url' in req.body) updates.brand_image_url = req.body.brand_image_url;
+
+        const pack = updatePack(req.params.id, updates);
         if (!pack) return res.status(404).json({ error: "Pack not found" });
         res.json(pack);
       } catch (err: any) {
