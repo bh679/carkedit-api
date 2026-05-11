@@ -1,8 +1,8 @@
-name: Deploy api to production
+name: Deploy api to dev
 
 on:
   push:
-    tags: ['v[0-9]*']
+    branches: ['**']
 
 jobs:
   deploy:
@@ -10,7 +10,7 @@ jobs:
     steps:
       - name: Trigger carkedit-deploy
         env:
-          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN_PROD_API }}
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN_DEV_API }}
           REF_NAME: ${{ github.ref_name }}
         run: |
           set -eo pipefail
@@ -18,7 +18,7 @@ jobs:
           RESPONSE=$(curl -sS -w "\nHTTP_CODE:%{http_code}" \
             -X POST \
             -H "Authorization: Bearer ${DEPLOY_TOKEN}" \
-            "https://api.carkedit.com/api/admin/deploy/api/api?${QUERY}")
+            "https://dev.play.carkedit.com/api/admin/deploy/api/api?${QUERY}")
           HTTP_CODE=$(echo "$RESPONSE" | grep -oE 'HTTP_CODE:[0-9]+' | cut -d: -f2)
           BODY=$(echo "$RESPONSE" | sed '/^HTTP_CODE:/d')
           echo "$BODY" | jq . || echo "$BODY"
