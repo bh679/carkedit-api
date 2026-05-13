@@ -92,10 +92,14 @@ export function requestLogger(opts: RequestLoggerOptions = {}) {
         method: req.method,
         url: req.url,
       }),
-      res: (res: any) => ({
-        statusCode: res.statusCode,
-        bytes: res.getHeader ? res.getHeader('content-length') : undefined,
-      }),
+      res: (res: any) => {
+        const headers = res.headers ?? (res.getHeaders ? res.getHeaders() : {});
+        const cl = headers['content-length'];
+        return {
+          statusCode: res.statusCode,
+          bytes: typeof cl === 'string' ? parseInt(cl, 10) : cl,
+        };
+      },
     },
   };
 
