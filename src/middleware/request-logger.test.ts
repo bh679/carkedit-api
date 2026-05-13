@@ -2,7 +2,14 @@ import express from 'express';
 import http from 'node:http';
 import { AddressInfo } from 'node:net';
 import { Writable } from 'node:stream';
-import { attachRequestId, pickLevel, requestLogger, resolveThresholds } from './request-logger.js';
+import pino from 'pino';
+import {
+  attachRequestId,
+  pickLevel,
+  REDACTED_HEADER_PATHS,
+  requestLogger,
+  resolveThresholds,
+} from './request-logger.js';
 
 interface CapturedLine {
   level: number;
@@ -184,12 +191,14 @@ describe('requestLogger output shape', () => {
   beforeAll(async () => { ctx = await buildApp(); });
   afterAll(async () => { await ctx.close(); });
 
-  it('emits one JSON line per successful request with method, url, statusCode, level=info', async () => {
+  it('emits one JSON line per successful request with method, url, statusCode, bytes, level=info', async () => {
     await get(`${ctx.baseUrl}/healthy`);
     const line = await waitForLine(ctx.lines, (l) => l.req?.url === '/healthy');
     expect(line.level).toBe(30);
     expect(line.req?.method).toBe('GET');
     expect(line.res?.statusCode).toBe(200);
+    // express res.json({ ok: true }) sets Content-Length to the body length: '{"ok":true}' = 11
+    expect(line.res?.bytes).toBe(11);
     expect(typeof line.req?.id).toBe('string');
   });
 
@@ -207,7 +216,11 @@ describe('requestLogger output shape', () => {
     expect(line.res?.statusCode).toBe(500);
   });
 
-  it('never emits the Authorization header value', async () => {
+  it('does not leak the Authorization header to stdout (smoke-level grep)', async () => {
+    // This proves the integrated middleware emits no Bearer token. The companion
+    // "REDACTED_HEADER_PATHS" suite below exercises the redact paths directly, so
+    // even if a future change broadens the req serializer to include headers,
+    // the redact config will still strip them — and there is a test asserting that.
     await get(`${ctx.baseUrl}/healthy`, { authorization: 'Bearer should-not-appear' });
     await waitForLine(ctx.lines, (l) => l.req?.url === '/healthy');
     for (const l of ctx.lines) {
@@ -231,6 +244,42 @@ describe('requestLogger output shape', () => {
     await get(`${ctx.baseUrl}/healthy?code=hello`);
     const line = await waitForLine(ctx.lines, (l) => l.req?.url === '/healthy?code=hello');
     expect(line.roomCode).toBeUndefined();
+  });
+});
+
+describe('REDACTED_HEADER_PATHS', () => {
+  it('strips authorization, cookie, set-cookie, x-amz-security-token from any logged req.headers', () => {
+    const { lines, stream } = makeCapture();
+    const logger = pino(
+      { redact: { paths: [...REDACTED_HEADER_PATHS], remove: true } },
+      stream,
+    );
+    logger.info(
+      {
+        req: {
+          headers: {
+            authorization: 'Bearer leaking-token-987',
+            cookie: 'session=abc',
+            'set-cookie': ['session=abc'],
+            'x-amz-security-token': 'aws-sts-xyz',
+            host: 'example.com',
+            'user-agent': 'curl/8',
+          },
+        },
+      },
+      'request completed',
+    );
+    const line = lines[0] as any;
+    expect(line).toBeDefined();
+    expect(line.req.headers.authorization).toBeUndefined();
+    expect(line.req.headers.cookie).toBeUndefined();
+    expect(line.req.headers['set-cookie']).toBeUndefined();
+    expect(line.req.headers['x-amz-security-token']).toBeUndefined();
+    // Non-sensitive headers must pass through untouched.
+    expect(line.req.headers.host).toBe('example.com');
+    expect(line.req.headers['user-agent']).toBe('curl/8');
+    // Belt-and-braces: the token must not appear anywhere in the raw output.
+    expect(JSON.stringify(line)).not.toContain('leaking-token-987');
   });
 });
 
