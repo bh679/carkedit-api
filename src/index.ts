@@ -28,15 +28,20 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "4500", 10);
 const clientDir = process.env.CLIENT_DIR || path.join(__dirname, "../../carkedit-client");
 
-// Initialize Firebase Admin SDK
+// Initialize Firebase Admin SDK. The project_id from the service-account
+// JSON drives the same-origin OAuth proxy below, so swapping the JSON file
+// per environment (dev/staging/prod) automatically points the proxy at the
+// matching Firebase project.
 const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH || path.join(__dirname, "../firebase-service-account.json");
+let firebaseProjectId = "carkedit-5cc8e";
 try {
   if (fs.existsSync(serviceAccountPath)) {
     const { initializeApp, cert } = await import("firebase-admin/app");
     const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, "utf-8"));
+    firebaseProjectId = serviceAccount.project_id || firebaseProjectId;
     initializeApp({ credential: cert(serviceAccount) });
     setFirebaseAvailable(true);
-    console.log("[CarkedIt API] Firebase Admin initialized");
+    console.log(`[CarkedIt API] Firebase Admin initialized (project: ${firebaseProjectId})`);
   } else {
     console.warn("[CarkedIt API] Firebase service account not found — auth features disabled");
   }
@@ -63,12 +68,14 @@ const server = defineServer({
 
     // Reverse-proxy Firebase auth handler so the OAuth redirect stays on
     // the same origin. This avoids Safari ITP blocking third-party cookies
-    // when authDomain points to firebaseapp.com.
+    // when authDomain points to firebaseapp.com. Target host is derived
+    // from the service-account project_id captured at startup.
     app.all('/__/auth/*', (req, res) => {
-      const targetUrl = `https://carkedit-5cc8e.firebaseapp.com${req.originalUrl}`;
+      const proxyHost = `${firebaseProjectId}.firebaseapp.com`;
+      const targetUrl = `https://${proxyHost}${req.originalUrl}`;
       const proxyReq = https.request(targetUrl, {
         method: req.method,
-        headers: { ...req.headers, host: 'carkedit-5cc8e.firebaseapp.com' },
+        headers: { ...req.headers, host: proxyHost },
       }, (proxyRes) => {
         res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
         proxyRes.pipe(res);
