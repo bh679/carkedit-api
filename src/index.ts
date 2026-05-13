@@ -16,6 +16,7 @@ import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, u
 import { createGenerationLog, listGenerationLog, mergeLogEntries } from "./db/generation-log.js";
 import { optionalAuth, requireAuth, requireAdmin, setFirebaseAvailable, isFirebaseAvailable } from "./middleware/auth.js";
 import { publicWriteLimiter, publicBodyLimit } from "./middleware/rate-limit.js";
+import { attachRequestId, requestLogger } from "./middleware/request-logger.js";
 import type { GameResult, IssueReport } from "./db/types.js";
 import { listProviders, getProvider, buildPrompt } from "./services/image-gen/index.js";
 import { DEFAULT_STYLE } from "./services/image-gen/default-style.js";
@@ -50,6 +51,12 @@ const server = defineServer({
     game: defineRoom(GameRoom),
   },
   express: (app) => {
+    // Request-level observability. Runs before everything else so every
+    // response — including the Firebase /__/auth/* proxy and static-file
+    // hits — gets one structured JSON log line on stdout.
+    app.use(attachRequestId);
+    app.use(requestLogger());
+
     // Increased limit to 10MB to support base64-encoded reference images
     // in image-editing requests (e.g. mystery card question mark).
     app.use(express.json({ limit: '10mb' }));
