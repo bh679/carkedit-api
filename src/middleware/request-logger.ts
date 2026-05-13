@@ -6,6 +6,13 @@ import type { DestinationStream } from 'pino';
 const DEFAULT_WARN_MS = 500;
 const DEFAULT_ERROR_MS = 2000;
 
+export const REDACTED_HEADER_PATHS = [
+  'req.headers.authorization',
+  'req.headers.cookie',
+  'req.headers["set-cookie"]',
+  'req.headers["x-amz-security-token"]',
+] as const;
+
 function parsePositiveInt(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
   const n = parseInt(value, 10);
@@ -78,12 +85,7 @@ export function requestLogger(opts: RequestLoggerOptions = {}) {
       return props;
     },
     redact: {
-      paths: [
-        'req.headers.authorization',
-        'req.headers.cookie',
-        'req.headers["set-cookie"]',
-        'req.headers["x-amz-security-token"]',
-      ],
+      paths: [...REDACTED_HEADER_PATHS],
       remove: true,
     },
     serializers: {
