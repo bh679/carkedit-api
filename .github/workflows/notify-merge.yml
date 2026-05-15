@@ -40,5 +40,6 @@ jobs:
           BODY=$(echo "$RESPONSE" | sed '/^HTTP_CODE:/d')
           echo "$BODY" | jq . || echo "$BODY"
           if [ "$HTTP_CODE" -ge 400 ]; then
-            echo "::warning::merge notify HTTP $HTTP_CODE — Discord notification skipped"
+            echo "::error::merge notify HTTP $HTTP_CODE — Discord notification failed"
+            exit 1
           fi
