@@ -12,7 +12,7 @@ plan, test, merge — with full human oversight at each stage.
 ## Project Overview
 
 - **Project:** CarkedItOnline
-- **Live URL:** brennan.games/carkedit
+- **Live URL:** play.carkedit.com
 - **Tech stack:** Node.js + Colyseus (multiplayer game server)
 - **API Base Path:** /api/carkedit
 - **Database:** In-memory (Colyseus state)
