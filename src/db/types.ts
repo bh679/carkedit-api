@@ -26,7 +26,26 @@ export interface GameResult {
   api_version?: string;
   client_version?: string;
   settings_json?: string;
+  host_ip_hash?: string;
+  host_user_id?: string;
   players: GamePlayerResult[];
+}
+
+export interface UserGameStat {
+  name_key: string;
+  display_name: string;
+  games_played: number;
+  total_seconds: number;
+  first_game_at: string | null;
+  last_game_at: string | null;
+  distinct_host_ips: number;
+  distinct_host_user_ids: number;
+  matched_user_id: string | null;
+  email: string | null;
+  avatar_url: string | null;
+  birth_month: number | null;
+  birth_day: number | null;
+  matched_user_created_at: string | null;
 }
 
 export interface GameSummary {

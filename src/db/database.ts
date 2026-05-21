@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import type { GameResult, GameSummary, GameDetail, GameDetailCardPlay, GamePlayerResult, CardPlay, CardDraw, CardStat, IssueReport, GameEvent, GameEventRow, SurveyResponse, SurveyStats } from './types.js';
+import type { GameResult, GameSummary, GameDetail, GameDetailCardPlay, GamePlayerResult, CardPlay, CardDraw, CardStat, IssueReport, GameEvent, GameEventRow, SurveyResponse, SurveyStats, UserGameStat } from './types.js';
 import { DIE_CARDS, LIVING_CARDS, BYE_CARDS } from '../data/cards.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -39,7 +39,9 @@ export function initDatabase(): void {
       is_dev INTEGER NOT NULL DEFAULT 0,
       api_version TEXT,
       client_version TEXT,
-      settings_json TEXT
+      settings_json TEXT,
+      host_ip_hash TEXT,
+      host_user_id TEXT
     );
 
     CREATE TABLE IF NOT EXISTS game_players (
@@ -242,12 +244,16 @@ export function initDatabase(): void {
     ['is_dev', 'ALTER TABLE games ADD COLUMN is_dev INTEGER NOT NULL DEFAULT 0'],
     ['api_version', 'ALTER TABLE games ADD COLUMN api_version TEXT'],
     ['client_version', 'ALTER TABLE games ADD COLUMN client_version TEXT'],
+    ['host_ip_hash', 'ALTER TABLE games ADD COLUMN host_ip_hash TEXT'],
+    ['host_user_id', 'ALTER TABLE games ADD COLUMN host_user_id TEXT'],
   ];
   for (const [col, sql] of migrations) {
     if (!cols.includes(col)) {
       db.exec(sql);
     }
   }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_games_host_user_id ON games(host_user_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_games_host_ip_hash ON games(host_ip_hash)');
 
   // Migrate: add missing columns to users if needed (for existing DBs)
   const userCols = db.prepare("PRAGMA table_info(users)").all().map((c: any) => c.name);
@@ -368,8 +374,8 @@ export function saveGameResult(result: GameResult): string {
   const insertGame = db.prepare(`
     INSERT INTO games (id, started_at, finished_at, mode, room_code, host_name, rounds, player_count,
       winner_name, winner_score, duration_seconds, status, live_status, has_error, is_dev,
-      api_version, client_version, settings_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      api_version, client_version, settings_json, host_ip_hash, host_user_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertPlayer = db.prepare(`
@@ -383,7 +389,8 @@ export function saveGameResult(result: GameResult): string {
       r.host_name ?? null, r.rounds, r.player_count, r.winner_name, r.winner_score,
       r.duration_seconds ?? null, r.status, r.live_status,
       r.has_error ? 1 : 0, r.is_dev ? 1 : 0,
-      r.api_version ?? null, r.client_version ?? null, r.settings_json ?? null
+      r.api_version ?? null, r.client_version ?? null, r.settings_json ?? null,
+      r.host_ip_hash ?? null, r.host_user_id ?? null
     );
     for (const p of r.players) {
       insertPlayer.run(r.id, p.player_name, p.score, p.rank);
@@ -403,28 +410,33 @@ export interface LiveGameData {
   player_count: number;
   is_dev: boolean;
   api_version?: string;
+  host_ip_hash?: string;
+  host_user_id?: string;
 }
 
 export function createLiveGame(data: LiveGameData): string {
   db.prepare(`
     INSERT INTO games (id, started_at, finished_at, mode, room_code, host_name, rounds, player_count,
       winner_name, winner_score, duration_seconds, status, live_status, has_error, is_dev,
-      api_version, client_version, settings_json)
-    VALUES (?, ?, '', ?, ?, ?, 0, ?, '', 0, NULL, 'lobby', 'live', 0, ?, ?, NULL, NULL)
+      api_version, client_version, settings_json, host_ip_hash, host_user_id)
+    VALUES (?, ?, '', ?, ?, ?, 0, ?, '', 0, NULL, 'lobby', 'live', 0, ?, ?, NULL, NULL, ?, ?)
   `).run(
     data.id, data.started_at, data.mode, data.room_code ?? null,
     data.host_name ?? null, data.player_count,
-    data.is_dev ? 1 : 0, data.api_version ?? null
+    data.is_dev ? 1 : 0, data.api_version ?? null,
+    data.host_ip_hash ?? null, data.host_user_id ?? null
   );
   return data.id;
 }
 
-export function updateLiveGame(id: string, updates: { playerCount?: number; status?: string; hostName?: string }): void {
+export function updateLiveGame(id: string, updates: { playerCount?: number; status?: string; hostName?: string; hostIpHash?: string; hostUserId?: string }): void {
   const sets: string[] = [];
   const params: any[] = [];
   if (updates.playerCount !== undefined) { sets.push('player_count = ?'); params.push(updates.playerCount); }
   if (updates.status !== undefined) { sets.push('status = ?'); params.push(updates.status); }
   if (updates.hostName !== undefined) { sets.push('host_name = ?'); params.push(updates.hostName); }
+  if (updates.hostIpHash !== undefined) { sets.push('host_ip_hash = COALESCE(host_ip_hash, ?)'); params.push(updates.hostIpHash); }
+  if (updates.hostUserId !== undefined) { sets.push('host_user_id = COALESCE(host_user_id, ?)'); params.push(updates.hostUserId); }
   if (sets.length === 0) return;
   params.push(id);
   db.prepare(`UPDATE games SET ${sets.join(', ')} WHERE id = ? AND live_status = 'live'`).run(...params);
@@ -440,6 +452,8 @@ export interface CompleteLiveGameData {
   has_error: boolean;
   is_dev: boolean;
   settings_json?: string;
+  host_ip_hash?: string;
+  host_user_id?: string;
   players: { player_name: string; score: number; rank: number }[];
 }
 
@@ -448,7 +462,9 @@ export function completeLiveGame(id: string, data: CompleteLiveGameData): void {
     UPDATE games SET finished_at = ?, rounds = ?, player_count = ?,
       winner_name = ?, winner_score = ?, duration_seconds = ?,
       status = 'finished', live_status = 'completed',
-      has_error = ?, is_dev = ?, settings_json = ?
+      has_error = ?, is_dev = ?, settings_json = ?,
+      host_ip_hash = COALESCE(?, host_ip_hash),
+      host_user_id = COALESCE(?, host_user_id)
     WHERE id = ?
   `);
 
@@ -462,6 +478,7 @@ export function completeLiveGame(id: string, data: CompleteLiveGameData): void {
       data.finished_at, data.rounds, data.player_count,
       data.winner_name, data.winner_score, data.duration_seconds ?? null,
       data.has_error ? 1 : 0, data.is_dev ? 1 : 0, data.settings_json ?? null,
+      data.host_ip_hash ?? null, data.host_user_id ?? null,
       id
     );
     for (const p of data.players) {
@@ -683,6 +700,75 @@ export function getStatsByPeriod(since: string): { finishedGames: number; totalG
   const longestPlayTime = (db.prepare("SELECT COALESCE(MAX(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL AND finished_at >= ?").get(since) as any).c;
 
   return { finishedGames, totalGames, unfinishedGames, abandonedGames, liveGames, totalPlayers, allPlayers, totalPlayTime, allPlayTime, avgPlayTime: Math.round(avgPlayTime), medianPlayTime: Math.round(medianPlayTime), longestPlayTime };
+}
+
+export type UserStatsDevFilter = 'all' | 'dev' | 'nodev';
+
+export function getUserGameStats(opts: { devFilter?: UserStatsDevFilter; limit?: number } = {}): {
+  players: UserGameStat[];
+  total_distinct: number;
+  total_matched_users: number;
+} {
+  const devFilter = opts.devFilter ?? 'nodev';
+  const limit = Math.min(Math.max(opts.limit ?? 200, 1), 1000);
+
+  let devClause = '';
+  if (devFilter === 'nodev') devClause = 'AND g.is_dev = 0';
+  else if (devFilter === 'dev') devClause = 'AND g.is_dev = 1';
+
+  const sql = `
+    WITH player_agg AS (
+      SELECT
+        LOWER(TRIM(gp.player_name))            AS name_key,
+        MIN(gp.player_name)                    AS display_name,
+        COUNT(DISTINCT gp.game_id)             AS games_played,
+        COALESCE(SUM(g.duration_seconds), 0)   AS total_seconds,
+        MIN(g.finished_at)                     AS first_game_at,
+        MAX(g.finished_at)                     AS last_game_at,
+        COUNT(DISTINCT g.host_ip_hash)         AS distinct_host_ips,
+        COUNT(DISTINCT g.host_user_id)         AS distinct_host_user_ids
+      FROM game_players gp
+      JOIN games g ON g.id = gp.game_id
+      WHERE 1=1 ${devClause}
+      GROUP BY LOWER(TRIM(gp.player_name))
+    ),
+    user_match AS (
+      SELECT
+        LOWER(TRIM(display_name)) AS name_key,
+        id, display_name, email, avatar_url,
+        birth_month, birth_day, created_at,
+        ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(display_name)) ORDER BY created_at) AS rn
+      FROM users
+    )
+    SELECT
+      p.name_key, p.display_name, p.games_played, p.total_seconds,
+      p.first_game_at, p.last_game_at,
+      p.distinct_host_ips, p.distinct_host_user_ids,
+      u.id   AS matched_user_id,
+      u.email, u.avatar_url, u.birth_month, u.birth_day,
+      u.created_at AS matched_user_created_at
+    FROM player_agg p
+    LEFT JOIN user_match u ON u.name_key = p.name_key AND u.rn = 1
+    ORDER BY p.total_seconds DESC, p.games_played DESC
+    LIMIT ?
+  `;
+
+  const rows = db.prepare(sql).all(limit) as UserGameStat[];
+
+  const totalRow = db.prepare(`
+    SELECT COUNT(DISTINCT LOWER(TRIM(gp.player_name))) AS total
+    FROM game_players gp
+    JOIN games g ON g.id = gp.game_id
+    WHERE 1=1 ${devClause}
+  `).get() as { total: number };
+
+  const matched = rows.reduce((n, r) => n + (r.matched_user_id ? 1 : 0), 0);
+
+  return {
+    players: rows,
+    total_distinct: totalRow.total ?? 0,
+    total_matched_users: matched,
+  };
 }
 
 export function saveCardPlays(plays: CardPlay[]): void {

@@ -350,12 +350,12 @@ export class GameRoom extends Room<{ state: GameState }> {
       playerCount: this.state.players.size,
     });
 
-    // Update live game record with player count and host name
+    // Update live game record with player count, and (on host join) host name + host user id.
     if (this._gameId) {
       try {
         updateLiveGame(this._gameId, {
           playerCount: this.state.players.size,
-          ...(isHost ? { hostName: player.name } : {}),
+          ...(isHost ? { hostName: player.name, hostUserId: player.userId || undefined } : {}),
         });
       } catch {}
     }
@@ -526,6 +526,7 @@ export class GameRoom extends Room<{ state: GameState }> {
         has_error: false,
         is_dev: this.state.devMode,
         settings_json: JSON.stringify(settings),
+        host_user_id: hostPlayer?.userId || undefined,
         players: sorted.map((p, i) => ({
           player_name: p.name,
           score: p.score,
