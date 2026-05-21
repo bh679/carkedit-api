@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHmac } from "node:crypto";
 import { exec } from "node:child_process";
 import https from "node:https";
 import path from "path";
@@ -10,7 +10,7 @@ import multer from "multer";
 import helmet from "helmet";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
-import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev, saveMailingListEntry } from "./db/database.js";
+import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev, saveMailingListEntry, getUserGameStats } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag } from "./db/users.js";
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, setPackBaseCost, getPackStats, listPackStatsAll } from "./db/packs.js";
 import { createGenerationLog, listGenerationLog, mergeLogEntries } from "./db/generation-log.js";
@@ -51,11 +51,25 @@ try {
 
 const serverStartedAt = new Date().toISOString();
 
+const ipHashSecret = process.env.CARKEDIT_IP_HASH_SECRET || '';
+if (!ipHashSecret) {
+  console.warn("[CarkedIt API] CARKEDIT_IP_HASH_SECRET not set — host IPs will not be captured on game submissions");
+}
+
+function hashIp(ip: string | undefined | null): string | null {
+  if (!ipHashSecret || !ip) return null;
+  return createHmac('sha256', ipHashSecret).update(ip).digest('hex');
+}
+
 const server = defineServer({
   rooms: {
     game: defineRoom(GameRoom),
   },
   express: (app) => {
+    // Trust X-Forwarded-For from one proxy hop (Apache reverse-proxy).
+    // Required so req.ip reflects the real client IP, not 127.0.0.1.
+    app.set('trust proxy', 1);
+
     // Request-level observability. Runs before everything else so every
     // response — including the Firebase /__/auth/* proxy and static-file
     // hits — gets one structured JSON log line on stdout.
@@ -276,7 +290,7 @@ const server = defineServer({
     });
 
     // Game history endpoints
-    app.post("/api/carkedit/games", publicWriteLimiter, publicBodyLimit, (req: any, res: any) => {
+    app.post("/api/carkedit/games", publicWriteLimiter, publicBodyLimit, optionalAuth(), (req: any, res: any) => {
       try {
         const { mode, rounds, players, settings, finishedAt, startedAt, hostName, status, clientVersion, isDev } = req.body;
         if (!players || !Array.isArray(players) || players.length === 0) {
@@ -309,6 +323,8 @@ const server = defineServer({
           api_version: pkg.version,
           client_version: clientVersion,
           settings_json: settings ? JSON.stringify(settings) : undefined,
+          host_ip_hash: hashIp(req.ip) ?? undefined,
+          host_user_id: req.localUser?.id ?? undefined,
           players: sorted.map((p: any, i: number) => coerceGamePlayer(p, i + 1)),
         };
 
@@ -327,6 +343,18 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Get stats error:", err);
         res.status(500).json({ error: "Failed to retrieve stats" });
+      }
+    });
+
+    app.get("/api/carkedit/users/stats", requireAdmin(), (req: any, res: any) => {
+      try {
+        const devRaw = (req.query.dev as string) || 'nodev';
+        const devFilter = (devRaw === 'all' || devRaw === 'dev' || devRaw === 'nodev') ? devRaw : 'nodev';
+        const limit = parseInt((req.query.limit as string) || '200', 10);
+        res.json(getUserGameStats({ devFilter, limit }));
+      } catch (err) {
+        console.error("[CarkedIt API] Get user stats error:", err);
+        res.status(500).json({ error: "Failed to retrieve user stats" });
       }
     });
 
