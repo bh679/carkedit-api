@@ -8,6 +8,23 @@ import { DIE_CARDS, LIVING_CARDS, BYE_CARDS } from '../data/cards.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.resolve(__dirname, '../../data/games.db');
 
+export const STATUS_GROUPS: Record<string, string[]> = {
+  lobby:    ['lobby', ''],
+  die:      ['die', 'die_phase'],
+  living:   ['live', 'living_setup', 'living_submit', 'living_reveal', 'living_convince', 'living_select', 'living_winner'],
+  bye:      ['bye', 'bye_setup', 'bye_submit', 'bye_reveal', 'bye_convince', 'bye_select', 'bye_winner'],
+  eulogy:   ['eulogy', 'eulogy_intro', 'eulogy_pick', 'eulogy_speech', 'eulogy_judge', 'eulogy_points'],
+  finished: ['finished', 'winner', 'game_over'],
+  other:    ['abandoned'],
+};
+
+export const DURATION_BUCKETS: Record<string, { min: number | null; max: number | null }> = {
+  under5:   { min: null, max: 299 },
+  '5to15':  { min: 300, max: 899 },
+  '15to30': { min: 900, max: 1799 },
+  over30:   { min: 1800, max: null },
+};
+
 let db: Database.Database;
 
 export function getDb(): Database.Database {
@@ -491,25 +508,85 @@ export interface GameFilters {
   dateTo?: string;
   errorsOnly?: boolean;
   devFilter?: 'all' | 'dev' | 'nodev';
-  statusFilter?: 'all' | 'finished' | 'abandoned' | 'live';
+  statusFilter?: 'all' | 'started' | 'finished' | 'abandoned' | 'live';
+  hideGroups?: string[];
+  hideRaw?: string[];
+  hideDurationBuckets?: string[];
+  hidePlayerCounts?: string[];
 }
 
-export function getRecentGames(filters: GameFilters = {}): { games: GameSummary[]; total: number } {
-  const { limit = 20, offset = 0, dateFrom, dateTo, errorsOnly, devFilter = 'all', statusFilter = 'all' } = filters;
+type FilterDim = 'date' | 'errors' | 'dev' | 'status' | 'groups' | 'raw' | 'duration' | 'players';
 
+function durationBucketCondition(key: string): { sql: string; params: any[] } | null {
+  if (key === 'unknown') return { sql: 'g.duration_seconds IS NULL', params: [] };
+  const b = DURATION_BUCKETS[key];
+  if (!b) return null;
+  if (b.min !== null && b.max !== null) return { sql: 'g.duration_seconds BETWEEN ? AND ?', params: [b.min, b.max] };
+  if (b.max !== null) return { sql: 'g.duration_seconds <= ?', params: [b.max] };
+  if (b.min !== null) return { sql: 'g.duration_seconds >= ?', params: [b.min] };
+  return null;
+}
+
+function buildConditions(filters: GameFilters, exclude: Set<FilterDim> = new Set()): { where: string; params: any[] } {
+  const { dateFrom, dateTo, errorsOnly, devFilter = 'all', statusFilter = 'all', hideGroups = [], hideRaw = [], hideDurationBuckets = [], hidePlayerCounts = [] } = filters;
   const conditions: string[] = [];
   const params: any[] = [];
 
-  if (dateFrom) { conditions.push('COALESCE(NULLIF(g.finished_at, \'\'), g.started_at) >= ?'); params.push(dateFrom); }
-  if (dateTo) { conditions.push('COALESCE(NULLIF(g.finished_at, \'\'), g.started_at) <= ?'); params.push(dateTo); }
-  if (errorsOnly) { conditions.push('g.has_error = 1'); }
-  if (devFilter === 'dev') { conditions.push('g.is_dev = 1'); }
-  if (devFilter === 'nodev') { conditions.push('g.is_dev = 0'); }
-  if (statusFilter === 'finished') { conditions.push("g.status = 'finished'"); }
-  if (statusFilter === 'abandoned') { conditions.push("g.live_status = 'abandoned'"); }
-  if (statusFilter === 'live') { conditions.push("g.live_status = 'live'"); }
+  if (!exclude.has('date')) {
+    if (dateFrom) { conditions.push('COALESCE(NULLIF(g.finished_at, \'\'), g.started_at) >= ?'); params.push(dateFrom); }
+    if (dateTo)   { conditions.push('COALESCE(NULLIF(g.finished_at, \'\'), g.started_at) <= ?'); params.push(dateTo); }
+  }
+  if (!exclude.has('errors') && errorsOnly) { conditions.push('g.has_error = 1'); }
+  if (!exclude.has('dev')) {
+    if (devFilter === 'dev')   conditions.push('g.is_dev = 1');
+    if (devFilter === 'nodev') conditions.push('g.is_dev = 0');
+  }
+  if (!exclude.has('status')) {
+    if (statusFilter === 'started')   conditions.push("g.status NOT IN ('lobby', '')");
+    if (statusFilter === 'finished')  conditions.push("g.status = 'finished'");
+    if (statusFilter === 'abandoned') conditions.push("g.live_status = 'abandoned'");
+    if (statusFilter === 'live')      conditions.push("g.live_status = 'live'");
+  }
+  if (!exclude.has('groups')) {
+    for (const g of hideGroups) {
+      const members = STATUS_GROUPS[g];
+      if (!members || members.length === 0) continue;
+      const placeholders = members.map(() => '?').join(', ');
+      conditions.push(`g.status NOT IN (${placeholders})`);
+      params.push(...members);
+    }
+  }
+  if (!exclude.has('raw')) {
+    for (const r of hideRaw) {
+      conditions.push('g.status != ?');
+      params.push(r);
+    }
+  }
+  if (!exclude.has('duration')) {
+    for (const key of hideDurationBuckets) {
+      const c = durationBucketCondition(key);
+      if (!c) continue;
+      conditions.push(`NOT (${c.sql})`);
+      params.push(...c.params);
+    }
+  }
+  if (!exclude.has('players')) {
+    for (const key of hidePlayerCounts) {
+      if (key === '7plus') { conditions.push('g.player_count < 7'); continue; }
+      const n = Number(key);
+      if (!Number.isFinite(n)) continue;
+      conditions.push('g.player_count != ?');
+      params.push(n);
+    }
+  }
 
   const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
+  return { where, params };
+}
+
+export function getRecentGames(filters: GameFilters = {}): { games: GameSummary[]; total: number } {
+  const { limit = 20, offset = 0 } = filters;
+  const { where, params } = buildConditions(filters);
 
   const total = (db.prepare(`SELECT COUNT(*) as count FROM games g ${where}`).get(...params) as { count: number }).count;
 
@@ -531,6 +608,120 @@ export function getRecentGames(filters: GameFilters = {}): { games: GameSummary[
   }
 
   return { games, total };
+}
+
+function countWhere(filters: GameFilters, exclude: Set<FilterDim>, extra?: { sql: string; params: any[] }): number {
+  const { where, params } = buildConditions(filters, exclude);
+  let sql = `SELECT COUNT(*) as count FROM games g`;
+  const allParams = [...params];
+  if (extra) {
+    sql += where ? ` ${where} AND (${extra.sql})` : ` WHERE ${extra.sql}`;
+    allParams.push(...extra.params);
+  } else {
+    sql += ` ${where}`;
+  }
+  return (db.prepare(sql).get(...allParams) as { count: number }).count;
+}
+
+export interface GameFilterCounts {
+  total: number;
+  date: { all: number; today: number; week: number; month: number };
+  errors: { off: number; on: number };
+  dev: { all: number; nodev: number; dev: number };
+  status: { all: number; started: number; finished: number; abandoned: number; live: number };
+  groups: Record<string, number>;
+  raw: Record<string, number>;
+  duration: Record<string, number>;
+  players: Record<string, number>;
+}
+
+export function getGameFilterCounts(filters: GameFilters = {}): GameFilterCounts {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+  const weekDayDiff = now.getDay() === 0 ? 6 : now.getDay() - 1;
+  const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - weekDayDiff).toISOString();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+  const dateCol = "COALESCE(NULLIF(g.finished_at, ''), g.started_at)";
+
+  // total uses ALL active filters
+  const total = countWhere(filters, new Set());
+
+  // date breakdown: exclude date filter, intersect with each range
+  const dateExcl: Set<FilterDim> = new Set(['date']);
+  const date = {
+    all:   countWhere(filters, dateExcl),
+    today: countWhere(filters, dateExcl, { sql: `${dateCol} >= ?`, params: [todayStart] }),
+    week:  countWhere(filters, dateExcl, { sql: `${dateCol} >= ?`, params: [weekStart] }),
+    month: countWhere(filters, dateExcl, { sql: `${dateCol} >= ?`, params: [monthStart] }),
+  };
+
+  const errorsExcl: Set<FilterDim> = new Set(['errors']);
+  const errors = {
+    off: countWhere(filters, errorsExcl),
+    on:  countWhere(filters, errorsExcl, { sql: 'g.has_error = 1', params: [] }),
+  };
+
+  const devExcl: Set<FilterDim> = new Set(['dev']);
+  const dev = {
+    all:   countWhere(filters, devExcl),
+    nodev: countWhere(filters, devExcl, { sql: 'g.is_dev = 0', params: [] }),
+    dev:   countWhere(filters, devExcl, { sql: 'g.is_dev = 1', params: [] }),
+  };
+
+  const statusExcl: Set<FilterDim> = new Set(['status']);
+  const status = {
+    all:       countWhere(filters, statusExcl),
+    started:   countWhere(filters, statusExcl, { sql: "g.status NOT IN ('lobby', '')", params: [] }),
+    finished:  countWhere(filters, statusExcl, { sql: "g.status = 'finished'", params: [] }),
+    abandoned: countWhere(filters, statusExcl, { sql: "g.live_status = 'abandoned'", params: [] }),
+    live:      countWhere(filters, statusExcl, { sql: "g.live_status = 'live'", params: [] }),
+  };
+
+  // groups + raw status counts: exclude groups+raw filters, then GROUP BY status
+  const groupsExcl: Set<FilterDim> = new Set(['groups', 'raw']);
+  const groupsWhere = buildConditions(filters, groupsExcl);
+  const rawRows = db.prepare(
+    `SELECT g.status as status, COUNT(*) as count FROM games g ${groupsWhere.where} GROUP BY g.status`
+  ).all(...groupsWhere.params) as { status: string; count: number }[];
+
+  const groups: Record<string, number> = {};
+  const raw: Record<string, number> = {};
+  for (const groupKey of Object.keys(STATUS_GROUPS)) groups[groupKey] = 0;
+  for (const row of rawRows) {
+    const statusKey = row.status ?? '';
+    raw[statusKey] = (raw[statusKey] || 0) + row.count;
+    let matched = false;
+    for (const [groupKey, members] of Object.entries(STATUS_GROUPS)) {
+      if (members.includes(statusKey)) { groups[groupKey] += row.count; matched = true; break; }
+    }
+    if (!matched) groups.other = (groups.other || 0) + row.count;
+  }
+
+  // duration: exclude duration filter, count each bucket
+  const durExcl: Set<FilterDim> = new Set(['duration']);
+  const duration: Record<string, number> = {};
+  for (const key of Object.keys(DURATION_BUCKETS)) {
+    const c = durationBucketCondition(key)!;
+    duration[key] = countWhere(filters, durExcl, c);
+  }
+  duration.unknown = countWhere(filters, durExcl, { sql: 'g.duration_seconds IS NULL', params: [] });
+
+  // players: exclude players filter, GROUP BY player_count
+  const playersExcl: Set<FilterDim> = new Set(['players']);
+  const playersWhere = buildConditions(filters, playersExcl);
+  const playerRows = db.prepare(
+    `SELECT g.player_count as pc, COUNT(*) as count FROM games g ${playersWhere.where} GROUP BY g.player_count ORDER BY pc ASC`
+  ).all(...playersWhere.params) as { pc: number; count: number }[];
+
+  const players: Record<string, number> = {};
+  let sevenPlus = 0;
+  for (const row of playerRows) {
+    if (row.pc >= 7) { sevenPlus += row.count; continue; }
+    players[String(row.pc)] = row.count;
+  }
+  if (sevenPlus > 0) players['7plus'] = sevenPlus;
+
+  return { total, date, errors, dev, status, groups, raw, duration, players };
 }
 
 export function getGameById(id: string): GameDetail | null {

@@ -10,7 +10,7 @@ import multer from "multer";
 import helmet from "helmet";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
-import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev, saveMailingListEntry } from "./db/database.js";
+import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameFilterCounts, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev, saveMailingListEntry } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag } from "./db/users.js";
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, setPackBaseCost, getPackStats, listPackStatsAll } from "./db/packs.js";
 import { createGenerationLog, listGenerationLog, mergeLogEntries } from "./db/generation-log.js";
@@ -353,21 +353,38 @@ const server = defineServer({
       }
     });
 
+    const parseCsv = (v: any): string[] => (typeof v === 'string' && v.length > 0) ? v.split(',').map(s => s.trim()).filter(Boolean) : [];
+    const buildGameFiltersFromQuery = (q: any) => ({
+      limit: Math.min(parseInt(q.limit as string) || 20, 100),
+      offset: parseInt(q.offset as string) || 0,
+      dateFrom: q.dateFrom as string || undefined,
+      dateTo: q.dateTo as string || undefined,
+      errorsOnly: q.errorsOnly === 'true',
+      devFilter: (['all', 'dev', 'nodev'].includes(q.dev) ? q.dev : 'all') as any,
+      statusFilter: (['all', 'started', 'finished', 'abandoned', 'live'].includes(q.status) ? q.status : 'all') as any,
+      hideGroups: parseCsv(q.hideGroups),
+      hideRaw: parseCsv(q.hideRaw),
+      hideDurationBuckets: parseCsv(q.hideDurationBuckets),
+      hidePlayerCounts: parseCsv(q.hidePlayerCounts),
+    });
+
     app.get("/api/carkedit/games", requireAdmin(), (_req: any, res: any) => {
       try {
-        const result = getRecentGames({
-          limit: Math.min(parseInt(_req.query.limit as string) || 20, 100),
-          offset: parseInt(_req.query.offset as string) || 0,
-          dateFrom: _req.query.dateFrom as string || undefined,
-          dateTo: _req.query.dateTo as string || undefined,
-          errorsOnly: _req.query.errorsOnly === 'true',
-          devFilter: (['all', 'dev', 'nodev'].includes(_req.query.dev) ? _req.query.dev : 'all') as any,
-          statusFilter: (['all', 'finished', 'abandoned', 'live'].includes(_req.query.status) ? _req.query.status : 'all') as any,
-        });
+        const result = getRecentGames(buildGameFiltersFromQuery(_req.query));
         res.json(result);
       } catch (err) {
         console.error("[CarkedIt API] Get games error:", err);
         res.status(500).json({ error: "Failed to retrieve games" });
+      }
+    });
+
+    app.get("/api/carkedit/games/filter-counts", requireAdmin(), (_req: any, res: any) => {
+      try {
+        const counts = getGameFilterCounts(buildGameFiltersFromQuery(_req.query));
+        res.json(counts);
+      } catch (err) {
+        console.error("[CarkedIt API] Get filter counts error:", err);
+        res.status(500).json({ error: "Failed to retrieve filter counts" });
       }
     });
 
