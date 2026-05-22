@@ -24,6 +24,7 @@ import { DEFAULT_STYLE } from "./services/image-gen/default-style.js";
 import githubProxyRouter from "./routes/github-proxy.js";
 import adminDeployTokenRouter from "./routes/admin-deploy-token.js";
 import { validateOptionalString, validateEnum, coerceWinner, coerceGamePlayer } from "./utils/validation.js";
+import { postWebhookEmbed, buildGameFinishEmbed } from "./services/discord/webhook.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "4500", 10);
@@ -353,6 +354,27 @@ const server = defineServer({
 
         const id = saveGameResult(result);
         res.json({ id, status: "saved" });
+
+        if (!result.is_dev) {
+          try {
+            const durationSeconds = result.started_at && result.finished_at
+              ? Math.round((new Date(result.finished_at).getTime() - new Date(result.started_at).getTime()) / 1000)
+              : null;
+            const embed = buildGameFinishEmbed({
+              mode: result.mode === "online" ? "online" : "local",
+              hostName: result.host_name || null,
+              winnerName: result.winner_name || null,
+              winnerScore: result.winner_score ?? null,
+              playerCount: result.player_count,
+              rounds: result.rounds,
+              durationSeconds,
+              apiVersion: pkg.version,
+            });
+            postWebhookEmbed(embed).catch(() => { /* never throws */ });
+          } catch (notifyErr) {
+            console.warn("[CarkedIt API] discord notify (local finish) failed:", notifyErr);
+          }
+        }
       } catch (err) {
         console.error("[CarkedIt API] Save game error:", err);
         res.status(500).json({ error: "Failed to save game" });

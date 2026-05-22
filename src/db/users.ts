@@ -1,7 +1,28 @@
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { getDb } from './database.js';
 import type { User } from './types.js';
 import type { Role } from '../auth/roles.js';
+import { postWebhookEmbed, buildAccountCreatedEmbed } from '../services/discord/webhook.js';
+
+const __pkgDir = path.dirname(fileURLToPath(import.meta.url));
+const __apiPkg = JSON.parse(fs.readFileSync(path.join(__pkgDir, '../../package.json'), 'utf-8'));
+
+function notifyAccountCreated(user: User, signUpMethod: 'firebase' | 'anonymous'): void {
+  try {
+    const embed = buildAccountCreatedEmbed({
+      displayName: user.display_name,
+      userId: user.id,
+      signUpMethod,
+      apiVersion: __apiPkg.version,
+    });
+    postWebhookEmbed(embed).catch(() => { /* never throws */ });
+  } catch (err) {
+    console.warn('[CarkedIt Users] discord notify (account created) failed:', err);
+  }
+}
 
 export function createUser(data: {
   display_name: string;
@@ -39,7 +60,9 @@ export function createUser(data: {
     VALUES (?, ?, ?, ?, ?, ?, ?, 'Host')
   `).run(id, data.firebase_uid ?? null, data.display_name, data.email ?? null, data.avatar_url ?? null, bm, bd);
 
-  return db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User;
+  const created = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User;
+  notifyAccountCreated(created, data.firebase_uid ? 'firebase' : 'anonymous');
+  return created;
 }
 
 export function getUserById(id: string): User | null {
@@ -75,7 +98,9 @@ export function upsertUserFromFirebase(firebaseUser: {
     VALUES (?, ?, ?, ?, ?, 0, 0, 'Host')
   `).run(id, firebaseUser.uid, firebaseUser.name || 'User', firebaseUser.email ?? null, firebaseUser.picture ?? null);
 
-  return db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User;
+  const created = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User;
+  notifyAccountCreated(created, 'firebase');
+  return created;
 }
 
 export function updateUserProfile(id: string, data: {
