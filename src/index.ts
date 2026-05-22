@@ -127,6 +127,11 @@ const server = defineServer({
       },
       hsts: { maxAge: 31536000, includeSubDomains: true },
       frameguard: { action: "deny" },
+      // Firebase signInWithPopup needs window.opener to survive the OAuth
+      // redirect to accounts.google.com. Helmet's default `same-origin` severs
+      // that reference cross-origin, which makes Firebase's postMessage
+      // handshake fail and surface `auth/popup-closed-by-user` even on success.
+      crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
     }));
 
     // Note: Colyseus already attaches a permissive CORS handler at the HTTP
