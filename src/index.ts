@@ -394,6 +394,7 @@ const server = defineServer({
       hideRaw: parseCsv(q.hideRaw),
       hideDurationBuckets: parseCsv(q.hideDurationBuckets),
       hidePlayerCounts: parseCsv(q.hidePlayerCounts),
+      playerName: (typeof q.playerName === 'string' && q.playerName.trim().length > 0) ? q.playerName : undefined,
     });
 
     app.get("/api/carkedit/games", requireAdmin(), (_req: any, res: any) => {
