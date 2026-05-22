@@ -11,10 +11,11 @@ import helmet from "helmet";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
 import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameFilterCounts, getGameById, getStats, getStatsByPeriod, getGamesStats, getGameStateDurations, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev, saveMailingListEntry, getUserGameStats } from "./db/database.js";
-import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag } from "./db/users.js";
+import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag, setUserRole } from "./db/users.js";
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, setPackBaseCost, getPackStats, listPackStatsAll } from "./db/packs.js";
 import { createGenerationLog, listGenerationLog, mergeLogEntries } from "./db/generation-log.js";
-import { optionalAuth, requireAuth, requireAdmin, setFirebaseAvailable, isFirebaseAvailable } from "./middleware/auth.js";
+import { optionalAuth, requireAuth, requireAdmin, requireQA, setFirebaseAvailable, isFirebaseAvailable } from "./middleware/auth.js";
+import { isRole } from "./auth/roles.js";
 import { publicWriteLimiter, publicBodyLimit } from "./middleware/rate-limit.js";
 import { attachRequestId, requestLogger } from "./middleware/request-logger.js";
 import type { GameResult, IssueReport } from "./db/types.js";
@@ -336,7 +337,7 @@ const server = defineServer({
       }
     });
 
-    app.get("/api/carkedit/games/stats", requireAdmin(), (_req: any, res: any) => {
+    app.get("/api/carkedit/games/stats", requireQA(), (_req: any, res: any) => {
       try {
         // Back-compat: `?since=ISO` still works via the filter builder's dateFrom mapping.
         const q = { ..._req.query };
@@ -348,7 +349,7 @@ const server = defineServer({
       }
     });
 
-    app.get("/api/carkedit/games/stats/by-state", requireAdmin(), (_req: any, res: any) => {
+    app.get("/api/carkedit/games/stats/by-state", requireQA(), (_req: any, res: any) => {
       try {
         res.json({ states: getGameStateDurations(buildGameFiltersFromQuery(_req.query)) });
       } catch (err) {
@@ -357,7 +358,7 @@ const server = defineServer({
       }
     });
 
-    app.get("/api/carkedit/users/stats", requireAdmin(), (req: any, res: any) => {
+    app.get("/api/carkedit/users/stats", requireQA(), (req: any, res: any) => {
       try {
         const devRaw = (req.query.dev as string) || 'nodev';
         const devFilter = (devRaw === 'all' || devRaw === 'dev' || devRaw === 'nodev') ? devRaw : 'nodev';
@@ -369,7 +370,7 @@ const server = defineServer({
       }
     });
 
-    app.get("/api/carkedit/games/stats/live", requireAdmin(), async (_req: any, res: any) => {
+    app.get("/api/carkedit/games/stats/live", requireQA(), async (_req: any, res: any) => {
       try {
         const rooms = await matchMaker.query({ name: "game" });
         const activeRooms = rooms.filter((r: any) => r.clients > 0);
@@ -382,7 +383,7 @@ const server = defineServer({
       }
     });
 
-    app.get("/api/carkedit/cards/stats", requireAdmin(), (_req: any, res: any) => {
+    app.get("/api/carkedit/cards/stats", requireQA(), (_req: any, res: any) => {
       try {
         const devFilter = (['all', 'dev', 'nodev'].includes(_req.query.dev) ? _req.query.dev : 'all') as 'all' | 'dev' | 'nodev';
         res.json(getCardStats(devFilter));
@@ -410,7 +411,7 @@ const server = defineServer({
       orderDir: (['asc', 'desc'].includes(q.orderDir) ? q.orderDir : 'desc') as any,
     });
 
-    app.get("/api/carkedit/games", requireAdmin(), (_req: any, res: any) => {
+    app.get("/api/carkedit/games", requireQA(), (_req: any, res: any) => {
       try {
         const result = getRecentGames(buildGameFiltersFromQuery(_req.query));
         res.json(result);
@@ -420,7 +421,7 @@ const server = defineServer({
       }
     });
 
-    app.get("/api/carkedit/games/filter-counts", requireAdmin(), (_req: any, res: any) => {
+    app.get("/api/carkedit/games/filter-counts", requireQA(), (_req: any, res: any) => {
       try {
         const counts = getGameFilterCounts(buildGameFiltersFromQuery(_req.query));
         res.json(counts);
@@ -430,7 +431,7 @@ const server = defineServer({
       }
     });
 
-    app.get("/api/carkedit/games/:id", requireAdmin(), (req: any, res: any) => {
+    app.get("/api/carkedit/games/:id", requireQA(), (req: any, res: any) => {
       try {
         const game = getGameById(req.params.id);
         if (!game) return res.status(404).json({ error: "Game not found" });
@@ -441,7 +442,7 @@ const server = defineServer({
       }
     });
 
-    app.get("/api/carkedit/games/:id/events", requireAdmin(), (req: any, res: any) => {
+    app.get("/api/carkedit/games/:id/events", requireQA(), (req: any, res: any) => {
       try {
         const events = getGameEvents(req.params.id);
         res.json({ game_id: req.params.id, events, total: events.length });
@@ -451,7 +452,7 @@ const server = defineServer({
       }
     });
 
-    app.patch("/api/carkedit/games/:id/dev", requireAdmin(), (req: any, res: any) => {
+    app.patch("/api/carkedit/games/:id/dev", requireQA(), (req: any, res: any) => {
       try {
         const { is_dev } = req.body;
         if (typeof is_dev !== 'boolean') {
@@ -466,7 +467,7 @@ const server = defineServer({
       }
     });
 
-    app.patch("/api/carkedit/surveys/:id/dev", requireAdmin(), (req: any, res: any) => {
+    app.patch("/api/carkedit/surveys/:id/dev", requireQA(), (req: any, res: any) => {
       try {
         const { is_dev } = req.body;
         if (typeof is_dev !== 'boolean') {
@@ -513,7 +514,7 @@ const server = defineServer({
       }
     });
 
-    app.get("/api/carkedit/issues", requireAdmin(), (_req: any, res: any) => {
+    app.get("/api/carkedit/issues", requireQA(), (_req: any, res: any) => {
       try {
         const limit = Math.min(parseInt(_req.query.limit as string) || 50, 200);
         const offset = parseInt(_req.query.offset as string) || 0;
@@ -557,7 +558,7 @@ const server = defineServer({
       }
     });
 
-    app.get("/api/carkedit/surveys/stats", requireAdmin(), (req: any, res: any) => {
+    app.get("/api/carkedit/surveys/stats", requireQA(), (req: any, res: any) => {
       try {
         const devFilter = (req.query.dev as string) === 'dev' || (req.query.dev as string) === 'nodev' ? req.query.dev : 'all';
         res.json(getSurveyStats(devFilter as any));
@@ -567,7 +568,7 @@ const server = defineServer({
       }
     });
 
-    app.get("/api/carkedit/surveys", requireAdmin(), (req: any, res: any) => {
+    app.get("/api/carkedit/surveys", requireQA(), (req: any, res: any) => {
       try {
         const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
         const offset = parseInt(req.query.offset as string) || 0;
@@ -633,7 +634,7 @@ const server = defineServer({
       }
     });
 
-    // Toggle admin flag (admin only)
+    // Toggle admin flag (admin only) — legacy; prefer PATCH /users/:id/role below.
     app.patch("/api/carkedit/users/:id/admin", requireAdmin(), (req: any, res: any) => {
       try {
         const { is_admin } = req.body;
@@ -646,6 +647,27 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Set admin error:", err);
         res.status(500).json({ error: "Failed to update admin status" });
+      }
+    });
+
+    // Set role (admin only). Body: { role: 'Player' | 'Host' | 'QA' | 'Admin' }.
+    // An admin cannot demote themselves — they'd lock the system out of role
+    // management. To remove the last admin, promote someone else first.
+    app.patch("/api/carkedit/users/:id/role", requireAdmin(), (req: any, res: any) => {
+      try {
+        const { role } = req.body ?? {};
+        if (!isRole(role)) {
+          return res.status(400).json({ error: "role must be one of Player, Host, QA, Admin" });
+        }
+        if (req.params.id === req.localUser!.id && role !== 'Admin') {
+          return res.status(400).json({ error: "Admins cannot demote themselves. Promote another user to admin first." });
+        }
+        const user = setUserRole(req.params.id, role);
+        if (!user) return res.status(404).json({ error: "User not found" });
+        res.json(user);
+      } catch (err) {
+        console.error("[CarkedIt API] Set role error:", err);
+        res.status(500).json({ error: "Failed to update role" });
       }
     });
 
@@ -669,7 +691,7 @@ const server = defineServer({
       try {
         const user = getUserById(req.params.id);
         if (!user) return res.status(404).json({ error: "User not found" });
-        const { firebase_uid, email, is_admin, ...publicProfile } = user;
+        const { firebase_uid, email, is_admin, role, ...publicProfile } = user;
         res.json(publicProfile);
       } catch (err) {
         console.error("[CarkedIt API] Get user error:", err);
@@ -812,7 +834,7 @@ const server = defineServer({
       }
     });
 
-    app.patch("/api/carkedit/packs/:id/dev", requireAdmin(), (req: any, res: any) => {
+    app.patch("/api/carkedit/packs/:id/dev", requireQA(), (req: any, res: any) => {
       try {
         const { is_dev } = req.body;
         if (typeof is_dev !== 'boolean') {
@@ -843,7 +865,7 @@ const server = defineServer({
     });
 
     // Must be registered BEFORE /packs/:id so the literal path wins.
-    app.get("/api/carkedit/packs/stats", requireAdmin(), (_req: any, res: any) => {
+    app.get("/api/carkedit/packs/stats", requireQA(), (_req: any, res: any) => {
       try {
         const packs = listPackStatsAll();
         res.json({ packs });
@@ -873,7 +895,7 @@ const server = defineServer({
       WHEN 'leonardo-phoenix-1' THEN 0.020 WHEN 'leonardo-phoenix-1.0' THEN 0.020
       ELSE 0.030 END)`;
 
-    app.get("/api/carkedit/costs/summary", requireAdmin(), (req: any, res: any) => {
+    app.get("/api/carkedit/costs/summary", requireQA(), (req: any, res: any) => {
       try {
         const db = getDb();
         const months = Math.min(Math.max(parseInt(req.query.months as string) || 12, 1), 60);
@@ -948,7 +970,7 @@ const server = defineServer({
       }
     });
 
-    app.get("/api/carkedit/costs/image-gen", requireAdmin(), (req: any, res: any) => {
+    app.get("/api/carkedit/costs/image-gen", requireQA(), (req: any, res: any) => {
       try {
         const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 50, 1), 200);
         const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
@@ -967,7 +989,7 @@ const server = defineServer({
       "Amazon Lightsail": 3.50,   // smallest Linux instance after 3-month trial
     };
 
-    app.get("/api/carkedit/costs/aws", requireAdmin(), async (req: any, res: any) => {
+    app.get("/api/carkedit/costs/aws", requireQA(), async (req: any, res: any) => {
       try {
         const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
         const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
@@ -1316,7 +1338,7 @@ const server = defineServer({
     // the art team uses to test AI image generators against a structured
     // style JSON. See carkedit-online/js/admin-image-gen/ for the client.
 
-    app.get("/api/carkedit/image-gen/providers", requireAdmin(), (_req: any, res: any) => {
+    app.get("/api/carkedit/image-gen/providers", requireQA(), (_req: any, res: any) => {
       try {
         res.json({ providers: listProviders() });
       } catch (err) {
@@ -1360,7 +1382,7 @@ const server = defineServer({
      * admin has saved something, deep-merged with DEFAULT_STYLE so new
      * keys (e.g. mysteryPrefix) are always present. Saved values win.
      */
-    app.get("/api/carkedit/image-gen/style", requireAdmin(), (_req: any, res: any) => {
+    app.get("/api/carkedit/image-gen/style", requireQA(), (_req: any, res: any) => {
       try {
         if (fs.existsSync(runtimeStylePath)) {
           const raw = fs.readFileSync(runtimeStylePath, 'utf8');
@@ -1385,7 +1407,7 @@ const server = defineServer({
      * plain object and pretty-prints with 2-space indent + trailing
      * newline.
      */
-    app.post("/api/carkedit/image-gen/style", requireAdmin(), (req: any, res: any) => {
+    app.post("/api/carkedit/image-gen/style", requireQA(), (req: any, res: any) => {
       try {
         const { style } = req.body || {};
         if (!style || typeof style !== 'object' || Array.isArray(style)) {
@@ -1401,7 +1423,7 @@ const server = defineServer({
       }
     });
 
-    app.get("/api/carkedit/image-gen/log", requireAdmin(), (req: any, res: any) => {
+    app.get("/api/carkedit/image-gen/log", requireQA(), (req: any, res: any) => {
       try {
         const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '50'), 10) || 50, 1), 200);
         const offset = Math.max(parseInt(String(req.query.offset ?? '0'), 10) || 0, 0);
@@ -1422,7 +1444,7 @@ const server = defineServer({
       }
     });
 
-    app.post("/api/carkedit/image-gen/generate", requireAdmin(), async (req: any, res: any) => {
+    app.post("/api/carkedit/image-gen/generate", requireQA(), async (req: any, res: any) => {
       try {
         const { providerId, cardText, cardPrompt, deckType, style, promptOverride, options, splitPosition, inputImage, cardSpecial, pack_id, card_id } = req.body || {};
 
@@ -1565,7 +1587,7 @@ const server = defineServer({
     //   event: complete   — full result JSON (same shape as /generate response)
     //   event: error      — { error: "..." }
 
-    app.post("/api/carkedit/image-gen/generate-stream", requireAdmin(), async (req: any, res: any) => {
+    app.post("/api/carkedit/image-gen/generate-stream", requireQA(), async (req: any, res: any) => {
       // SSE headers — keep-alive, no buffering.
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -1702,7 +1724,7 @@ const server = defineServer({
      * entry's image_url_b, then deletes the second entry. The Recent
      * generations gallery then shows a single combined card.
      */
-    app.post("/api/carkedit/image-gen/log/merge", requireAdmin(), (req: any, res: any) => {
+    app.post("/api/carkedit/image-gen/log/merge", requireQA(), (req: any, res: any) => {
       try {
         const { keepId, mergeId, updates } = req.body || {};
         if (!keepId || typeof keepId !== 'string') {
@@ -1739,7 +1761,7 @@ const server = defineServer({
      */
     app.post(
       "/api/carkedit/packs/:id/cards/:cardId/image-from-url",
-      requireAdmin(),
+      requireQA(),
       async (req: any, res: any) => {
         try {
           const { imageUrl, text_position, text_color } = req.body || {};

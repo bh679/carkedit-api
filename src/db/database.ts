@@ -283,6 +283,16 @@ export function initDatabase(): void {
   if (!userCols.includes('birth_day')) {
     db.exec('ALTER TABLE users ADD COLUMN birth_day INTEGER NOT NULL DEFAULT 0');
   }
+  if (!userCols.includes('role')) {
+    // RBAC migration: add role column, then one-shot backfill from is_admin.
+    // Existing admins → 'Admin'; everyone else → 'Host' (preserves today's
+    // behaviour where any signed-up user can create packs and host games).
+    // `is_admin` is intentionally retained for one release cycle so a rollback
+    // to the prior API still recognises admins. Drop in a follow-up patch.
+    db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'Host'");
+    db.exec("UPDATE users SET role = 'Admin' WHERE is_admin = 1");
+    db.exec('CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)');
+  }
 
   // Migrate: add is_dev column to survey_responses (for existing DBs)
   const surveyCols = db.prepare("PRAGMA table_info(survey_responses)").all().map((c: any) => c.name);

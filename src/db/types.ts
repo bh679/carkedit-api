@@ -159,6 +159,8 @@ export interface GameEventRow {
   created_at: string;
 }
 
+import type { Role } from '../auth/roles.js';
+
 export interface User {
   id: string;
   firebase_uid: string | null;
@@ -166,6 +168,7 @@ export interface User {
   email: string | null;
   avatar_url: string | null;
   is_admin: number;
+  role: Role;
   birth_month: number;
   birth_day: number;
   created_at: string;

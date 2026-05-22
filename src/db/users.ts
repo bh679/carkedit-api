@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from './database.js';
 import type { User } from './types.js';
+import type { Role } from '../auth/roles.js';
 
 export function createUser(data: {
   display_name: string;
@@ -34,8 +35,8 @@ export function createUser(data: {
   }
 
   db.prepare(`
-    INSERT INTO users (id, firebase_uid, display_name, email, avatar_url, birth_month, birth_day)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO users (id, firebase_uid, display_name, email, avatar_url, birth_month, birth_day, role)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'Host')
   `).run(id, data.firebase_uid ?? null, data.display_name, data.email ?? null, data.avatar_url ?? null, bm, bd);
 
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User;
@@ -70,8 +71,8 @@ export function upsertUserFromFirebase(firebaseUser: {
 
   const id = `usr_${randomUUID()}`;
   db.prepare(`
-    INSERT INTO users (id, firebase_uid, display_name, email, avatar_url, birth_month, birth_day)
-    VALUES (?, ?, ?, ?, ?, 0, 0)
+    INSERT INTO users (id, firebase_uid, display_name, email, avatar_url, birth_month, birth_day, role)
+    VALUES (?, ?, ?, ?, ?, 0, 0, 'Host')
   `).run(id, firebaseUser.uid, firebaseUser.name || 'User', firebaseUser.email ?? null, firebaseUser.picture ?? null);
 
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User;
@@ -113,8 +114,23 @@ export function setAdminFlag(userId: string, isAdmin: boolean): User | null {
   const db = getDb();
   const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as User | undefined;
   if (!existing) return null;
-  db.prepare(`UPDATE users SET is_admin = ?, updated_at = datetime('now') WHERE id = ?`)
-    .run(isAdmin ? 1 : 0, userId);
+  // Dual-write: keep is_admin and role aligned during the deprecation window.
+  // Promoting → Admin; demoting → Host (the baseline for signed-up users).
+  const nextRole: Role = isAdmin ? 'Admin' : 'Host';
+  db.prepare(`UPDATE users SET is_admin = ?, role = ?, updated_at = datetime('now') WHERE id = ?`)
+    .run(isAdmin ? 1 : 0, nextRole, userId);
+  return db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as User;
+}
+
+export function setUserRole(userId: string, role: Role): User | null {
+  const db = getDb();
+  const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as User | undefined;
+  if (!existing) return null;
+  // Dual-write is_admin so legacy code paths still see admin status until the
+  // column is dropped in a follow-up patch.
+  const isAdmin = role === 'Admin' ? 1 : 0;
+  db.prepare(`UPDATE users SET role = ?, is_admin = ?, updated_at = datetime('now') WHERE id = ?`)
+    .run(role, isAdmin, userId);
   return db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as User;
 }
 
