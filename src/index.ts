@@ -128,6 +128,15 @@ const server = defineServer({
       frameguard: { action: "deny" },
     }));
 
+    // Note: Colyseus already attaches a permissive CORS handler at the HTTP
+    // server level (`server.prependListener('request', ...)` in
+    // @colyseus/core/build/router/index — it reflects any Origin and responds
+    // to OPTIONS preflight before our Express stack runs). That's why the
+    // dev/staging stats page can fetch this API cross-origin without adding
+    // any middleware here. The real security gate is requireAdmin() on each
+    // route — auth uses Bearer tokens (no cookies), so Allow-Credentials does
+    // not grant anything without a valid Firebase ID token from this project.
+
     // Force browsers to revalidate HTML pages (picks up new versioned asset URLs)
     app.use((req, res, next) => {
       if (req.path.endsWith('.html') || req.path === '/' || !path.extname(req.path)) {
