@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { upsertUserFromFirebase } from '../db/users.js';
 import type { User } from '../db/types.js';
+import { hasRole, type Role } from '../auth/roles.js';
 
 // Extend Express Request
 declare global {
@@ -83,9 +84,10 @@ export function requireAuth() {
 }
 
 /**
- * Admin auth — requires valid token AND is_admin flag on the user record.
+ * Role-gated auth — requires valid token AND `localUser.role` ≥ `min` in the
+ * Player < Host < QA < Admin hierarchy.
  */
-export function requireAdmin() {
+export function requireRole(min: Role) {
   return async (req: Request, res: Response, next: NextFunction) => {
     if (!firebaseAuthAvailable) {
       return res.status(503).json({ error: 'Authentication service not configured' });
@@ -107,12 +109,27 @@ export function requireAdmin() {
         picture: decoded.picture,
       };
       req.localUser = upsertUserFromFirebase(req.firebaseUser);
-      if (!req.localUser?.is_admin) {
-        return res.status(403).json({ error: 'Admin access required' });
+      if (!hasRole(req.localUser, min)) {
+        return res.status(403).json({ error: `${min} access required` });
       }
       next();
     } catch (err: any) {
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
   };
+}
+
+/** Admin-tier access. Equivalent to requireRole('Admin'). */
+export function requireAdmin() {
+  return requireRole('Admin');
+}
+
+/** QA-tier access (includes Admin). */
+export function requireQA() {
+  return requireRole('QA');
+}
+
+/** Host-tier access (includes QA + Admin). */
+export function requireHost() {
+  return requireRole('Host');
 }
