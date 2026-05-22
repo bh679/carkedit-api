@@ -4,9 +4,9 @@ import { Card } from "./Card.js";
 
 export type GamePhase =
   | "lobby"
-  | "die_phase"
-  | "living_setup" | "living_submit" | "living_reveal" | "living_convince" | "living_select" | "living_winner"
-  | "bye_setup" | "bye_submit" | "bye_reveal" | "bye_convince" | "bye_select" | "bye_winner"
+  | "die_intro" | "die_phase"
+  | "live_intro" | "living_setup" | "living_submit" | "living_reveal" | "living_convince" | "living_select" | "living_winner"
+  | "bye_intro" | "bye_setup" | "bye_submit" | "bye_reveal" | "bye_convince" | "bye_select" | "bye_winner"
   | "eulogy_intro" | "eulogy_pick" | "eulogy_speech" | "eulogy_judge" | "eulogy_points"
   | "winner"
   | "game_over";

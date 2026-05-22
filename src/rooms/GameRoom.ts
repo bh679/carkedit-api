@@ -303,6 +303,15 @@ export class GameRoom extends Room<{ state: GameState }> {
       this.startGame();
     });
 
+    // Funeral Director override — advance past any *_intro phase even if
+    // not all players are ready. Mirrors the start_game host gate.
+    this.onMessage("start_phase_anyway", (client) => {
+      if (!this.isIntroPhase(this.state.phase)) return;
+      if (this.state.hostId && this.state.hostId !== client.sessionId) return;
+      this.logEvent(client, "phase_intro_start_anyway", { phase: this.state.phase });
+      this.advancePastIntro();
+    });
+
     console.log(`[GameRoom] Room created`);
   }
 
@@ -463,17 +472,69 @@ export class GameRoom extends Room<{ state: GameState }> {
   }
 
   private handleReady(client: Client) {
-    if (this.state.phase !== "lobby") return;
+    const inLobby = this.state.phase === "lobby";
+    const inIntro = this.isIntroPhase(this.state.phase);
+    if (!inLobby && !inIntro) return;
 
     const player = this.state.players.get(client.sessionId);
     if (!player) return;
 
     player.ready = !player.ready;
-    this.logEvent(client, "player_ready", { ready: player.ready });
+    this.logEvent(client, "player_ready", { ready: player.ready, phase: this.state.phase });
 
     const allReady = this.checkAllReady();
-    if (allReady && this.state.autoStartOnReady && this.state.players.size >= MIN_PLAYERS) {
-      this.startGame();
+    if (!allReady) return;
+    if (inLobby) {
+      if (this.state.autoStartOnReady && this.state.players.size >= MIN_PLAYERS) {
+        this.startGame();
+      }
+      return;
+    }
+    // Intro phase: auto-advance once all connected players are ready (no
+    // separate setting — same UX as lobby).
+    if (inIntro) {
+      this.advancePastIntro();
+    }
+  }
+
+  private isIntroPhase(phase: string): boolean {
+    return phase === "die_intro"
+      || phase === "live_intro"
+      || phase === "bye_intro"
+      || phase === "eulogy_intro";
+  }
+
+  /**
+   * Reset all players' ready flags. Called when entering an intro phase so
+   * lobby/previous-intro readiness doesn't leak forward.
+   */
+  private resetReadyFlags(): void {
+    this.state.players.forEach((p) => { p.ready = false; });
+  }
+
+  /**
+   * Advance from the current *_intro phase to its gameplay phase. Used by
+   * both auto-advance (all ready) and the FD start-anyway override.
+   */
+  private advancePastIntro(): void {
+    const phase = this.state.phase;
+    if (phase === "die_intro") {
+      this.state.phase = "die_phase";
+      console.log(`[GameRoom] die_intro → die_phase`);
+    } else if (phase === "live_intro") {
+      this.state.phase = "living_submit";
+      console.log(`[GameRoom] live_intro → living_submit`);
+    } else if (phase === "bye_intro") {
+      this.state.phase = "bye_submit";
+      console.log(`[GameRoom] bye_intro → bye_submit`);
+    } else if (phase === "eulogy_intro") {
+      // Eulogy intro has its own handler that picks eulogists / auto-selects.
+      // We synthesise the same effect as the host clicking "Start Eulogy Round"
+      // by invoking the existing handler with the host client.
+      const hostClient = this.clients.find((c) => c.sessionId === this.state.hostId);
+      if (hostClient) {
+        handleStartEulogyRound(this.state, hostClient);
+      }
     }
   }
 
@@ -679,7 +740,11 @@ export class GameRoom extends Room<{ state: GameState }> {
 
     this.state.currentTurn = finalOrder[0];
     this.state.round = 1;
-    this.state.phase = "die_phase";
+    // Begin with the Phase 1 intro screen. Ready flags from the lobby are
+    // already true here, so reset so players see a fresh "Ready to Die"
+    // for the die_intro screen. They can auto-advance again immediately.
+    this.resetReadyFlags();
+    this.state.phase = "die_intro";
 
     const playerNames: string[] = [];
     this.state.players.forEach(p => playerNames.push(p.name));

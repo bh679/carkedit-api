@@ -147,7 +147,11 @@ function transitionToLivingSetup(state: GameState): void {
     if (firstLDPlayer?.needsDieCard) {
       firstLDPlayer.needsDieCard = false;
     }
-    state.phase = "living_submit";
-    console.log(`[LivingPhase] Setup complete — ${firstLD} is The Living Dead`);
+    // Show the Phase 2 intro screen before dealing into the submit phase.
+    // GameRoom advances from live_intro → living_submit when all ready
+    // (or the host hits "Start Anyway").
+    state.players.forEach((p) => { p.ready = false; });
+    state.phase = "live_intro";
+    console.log(`[LivingPhase] Setup complete — ${firstLD} is The Living Dead, awaiting live_intro ready`);
   }
 }

@@ -497,7 +497,11 @@ export function transitionToByeSetup(state: GameState): void {
     if (firstLDPlayer?.needsDieCard) {
       firstLDPlayer.needsDieCard = false;
     }
-    state.phase = "bye_submit";
-    console.log(`[ByePhase] Setup complete — ${firstLD} is The Living Dead`);
+    // Show the Phase 3 intro screen before dealing into the submit phase.
+    // GameRoom advances from bye_intro → bye_submit when all ready (or the
+    // host hits "Start Anyway").
+    state.players.forEach((p) => { p.ready = false; });
+    state.phase = "bye_intro";
+    console.log(`[ByePhase] Setup complete — ${firstLD} is The Living Dead, awaiting bye_intro ready`);
   }
 }
