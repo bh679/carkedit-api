@@ -122,7 +122,15 @@ const server = defineServer({
             "https://www.gstatic.com", "https://raw.githubusercontent.com", "https://unpkg.com",
             "https://play.carkedit.com", "https://staging.play.carkedit.com", "https://dev.play.carkedit.com",
           ],
-          frameSrc: ["'self'", "https://*.firebaseapp.com", "https://accounts.google.com"],
+          // Sibling carkedit hosts in frame-src so the stats-page "preview
+          // production data" toggle can sign in via the secondary Firebase
+          // app — Firebase loads a hidden /__/auth/iframe on the prod host
+          // from a staging/dev page, which would otherwise be blocked here.
+          // Mirrors what connectSrc already does for cross-origin fetches.
+          frameSrc: [
+            "'self'", "https://*.firebaseapp.com", "https://accounts.google.com",
+            "https://play.carkedit.com", "https://staging.play.carkedit.com", "https://dev.play.carkedit.com",
+          ],
         },
       },
       hsts: { maxAge: 31536000, includeSubDomains: true },
