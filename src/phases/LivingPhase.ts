@@ -38,6 +38,37 @@ export function handleSubmitCard(state: GameState, client: Client, cardIndex: nu
   }
 }
 
+export function handleSwapCard(state: GameState, client: Client, cardIndex: number): void {
+  const validPhases = ["living_submit", "bye_submit"];
+  if (!validPhases.includes(state.phase)) return;
+  if (state.currentLivingDead === client.sessionId) return;
+
+  const player = state.players.get(client.sessionId);
+  if (!player) return;
+  if (!player.hasSubmitted) return;
+  if (cardIndex < 0 || cardIndex >= player.hand.length) return;
+
+  const oldIndex = state.submittedCards.findIndex(
+    (c) => c.submittedBy === client.sessionId,
+  );
+  if (oldIndex < 0) return;
+
+  const oldCard = state.submittedCards.splice(oldIndex, 1)[0];
+  const newCard = player.hand.splice(cardIndex, 1)[0];
+  if (!newCard) {
+    // Roll back the submittedCards removal so server state stays consistent.
+    state.submittedCards.splice(oldIndex, 0, oldCard);
+    return;
+  }
+
+  newCard.faceUp = false;
+  newCard.submittedBy = client.sessionId;
+  state.submittedCards.push(newCard);
+  player.hand.push(oldCard);
+
+  console.log(`[LivingPhase] ${player.name} swapped their submitted card`);
+}
+
 export function handleRevealSubmission(state: GameState, client: Client): void {
   // Validate phase
   const validPhases = ["living_convince", "bye_convince"];
