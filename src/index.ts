@@ -10,7 +10,7 @@ import multer from "multer";
 import helmet from "helmet";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
-import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameFilterCounts, getGameById, getStats, getStatsByPeriod, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev, saveMailingListEntry, getUserGameStats } from "./db/database.js";
+import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameFilterCounts, getGameById, getStats, getStatsByPeriod, getGamesStats, getGameStateDurations, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev, saveMailingListEntry, getUserGameStats } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag, setUserRole } from "./db/users.js";
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, setPackBaseCost, getPackStats, listPackStatsAll } from "./db/packs.js";
 import { createGenerationLog, listGenerationLog, mergeLogEntries } from "./db/generation-log.js";
@@ -339,11 +339,22 @@ const server = defineServer({
 
     app.get("/api/carkedit/games/stats", requireQA(), (_req: any, res: any) => {
       try {
-        const since = _req.query.since as string | undefined;
-        res.json(since ? getStatsByPeriod(since) : getStats());
+        // Back-compat: `?since=ISO` still works via the filter builder's dateFrom mapping.
+        const q = { ..._req.query };
+        if (q.since && !q.dateFrom) q.dateFrom = q.since;
+        res.json(getGamesStats(buildGameFiltersFromQuery(q)));
       } catch (err) {
         console.error("[CarkedIt API] Get stats error:", err);
         res.status(500).json({ error: "Failed to retrieve stats" });
+      }
+    });
+
+    app.get("/api/carkedit/games/stats/by-state", requireQA(), (_req: any, res: any) => {
+      try {
+        res.json({ states: getGameStateDurations(buildGameFiltersFromQuery(_req.query)) });
+      } catch (err) {
+        console.error("[CarkedIt API] Get state stats error:", err);
+        res.status(500).json({ error: "Failed to retrieve state stats" });
       }
     });
 
@@ -395,6 +406,9 @@ const server = defineServer({
       hideRaw: parseCsv(q.hideRaw),
       hideDurationBuckets: parseCsv(q.hideDurationBuckets),
       hidePlayerCounts: parseCsv(q.hidePlayerCounts),
+      playerName: (typeof q.playerName === 'string' && q.playerName.trim().length > 0) ? q.playerName : undefined,
+      orderBy: (['recency', 'duration'].includes(q.orderBy) ? q.orderBy : 'recency') as any,
+      orderDir: (['asc', 'desc'].includes(q.orderDir) ? q.orderDir : 'desc') as any,
     });
 
     app.get("/api/carkedit/games", requireQA(), (_req: any, res: any) => {

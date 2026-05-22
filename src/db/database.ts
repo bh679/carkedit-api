@@ -528,6 +528,9 @@ export function getLastActivityForGame(gameId: string): string | null {
   return row?.last_activity ?? null;
 }
 
+export type GameOrderBy = 'recency' | 'duration';
+export type GameOrderDir = 'asc' | 'desc';
+
 export interface GameFilters {
   limit?: number;
   offset?: number;
@@ -540,9 +543,12 @@ export interface GameFilters {
   hideRaw?: string[];
   hideDurationBuckets?: string[];
   hidePlayerCounts?: string[];
+  playerName?: string;
+  orderBy?: GameOrderBy;
+  orderDir?: GameOrderDir;
 }
 
-type FilterDim = 'date' | 'errors' | 'dev' | 'status' | 'groups' | 'raw' | 'duration' | 'players';
+type FilterDim = 'date' | 'errors' | 'dev' | 'status' | 'groups' | 'raw' | 'duration' | 'players' | 'playerName';
 
 function durationBucketCondition(key: string): { sql: string; params: any[] } | null {
   if (key === 'unknown') return { sql: 'g.duration_seconds IS NULL', params: [] };
@@ -606,16 +612,25 @@ function buildConditions(filters: GameFilters, exclude: Set<FilterDim> = new Set
       params.push(n);
     }
   }
+  if (!exclude.has('playerName') && filters.playerName) {
+    conditions.push('EXISTS (SELECT 1 FROM game_players gp WHERE gp.game_id = g.id AND LOWER(TRIM(gp.player_name)) = ?)');
+    params.push(filters.playerName.trim().toLowerCase());
+  }
 
   const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
   return { where, params };
 }
 
 export function getRecentGames(filters: GameFilters = {}): { games: GameSummary[]; total: number } {
-  const { limit = 20, offset = 0 } = filters;
+  const { limit = 20, offset = 0, orderBy = 'recency', orderDir = 'desc' } = filters;
   const { where, params } = buildConditions(filters);
 
   const total = (db.prepare(`SELECT COUNT(*) as count FROM games g ${where}`).get(...params) as { count: number }).count;
+
+  const dir = orderDir === 'asc' ? 'ASC' : 'DESC';
+  const orderClause = orderBy === 'duration'
+    ? `g.duration_seconds IS NULL, g.duration_seconds ${dir}, COALESCE(NULLIF(g.finished_at, ''), g.started_at) DESC`
+    : `COALESCE(NULLIF(g.finished_at, ''), g.started_at) ${dir}`;
 
   const games = db.prepare(`
     SELECT g.id, g.started_at, g.finished_at, g.mode, g.room_code, g.host_name, g.rounds, g.player_count,
@@ -623,7 +638,7 @@ export function getRecentGames(filters: GameFilters = {}): { games: GameSummary[
       g.api_version, g.client_version,
       (SELECT MAX(e.created_at) FROM game_events e WHERE e.game_id = g.id) as last_activity_at,
       (SELECT COUNT(*) FROM issue_reports ir WHERE ir.room_code = g.room_code AND g.room_code IS NOT NULL) as issue_count
-    FROM games g ${where} ORDER BY COALESCE(NULLIF(g.finished_at, ''), g.started_at) DESC LIMIT ? OFFSET ?
+    FROM games g ${where} ORDER BY ${orderClause} LIMIT ? OFFSET ?
   `).all(...params, limit, offset) as GameSummary[];
 
   const getPlayers = db.prepare(`
@@ -854,53 +869,205 @@ export function setSurveyDev(surveyId: string, isDev: boolean): SurveyResponse |
   return row ?? null;
 }
 
-export function getStats(): { finishedGames: number; totalGames: number; unfinishedGames: number; abandonedGames: number; liveGames: number; totalPlayers: number; allPlayers: number; totalPlayTime: number; allPlayTime: number; avgPlayTime: number; medianPlayTime: number; longestPlayTime: number } {
-  const finishedGames = (db.prepare("SELECT COUNT(*) as c FROM games WHERE status = 'finished'").get() as any).c;
-  const totalGames = (db.prepare("SELECT COUNT(*) as c FROM games").get() as any).c;
-  const unfinishedGames = totalGames - finishedGames;
-  const abandonedGames = (db.prepare("SELECT COUNT(*) as c FROM games WHERE live_status = 'abandoned'").get() as any).c;
-  const liveGames = (db.prepare("SELECT COUNT(*) as c FROM games WHERE live_status = 'live'").get() as any).c;
-  const totalPlayers = (db.prepare("SELECT COALESCE(SUM(player_count), 0) as c FROM games WHERE status = 'finished'").get() as any).c;
-  const allPlayers = (db.prepare("SELECT COALESCE(SUM(player_count), 0) as c FROM games").get() as any).c;
-  const totalPlayTime = (db.prepare("SELECT COALESCE(SUM(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL").get() as any).c;
-  const allPlayTime = (db.prepare("SELECT COALESCE(SUM(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL").get() as any).c;
-  const avgPlayTime = (db.prepare("SELECT COALESCE(AVG(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL").get() as any).c;
-
-  // Median
-  const durations = db.prepare("SELECT duration_seconds FROM games WHERE duration_seconds IS NOT NULL ORDER BY duration_seconds").all().map((r: any) => r.duration_seconds);
-  let medianPlayTime = 0;
-  if (durations.length > 0) {
-    const mid = Math.floor(durations.length / 2);
-    medianPlayTime = durations.length % 2 === 0 ? (durations[mid - 1] + durations[mid]) / 2 : durations[mid];
-  }
-
-  const longestPlayTime = (db.prepare("SELECT COALESCE(MAX(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL").get() as any).c;
-
-  return { finishedGames, totalGames, unfinishedGames, abandonedGames, liveGames, totalPlayers, allPlayers, totalPlayTime, allPlayTime, avgPlayTime: Math.round(avgPlayTime), medianPlayTime: Math.round(medianPlayTime), longestPlayTime };
+export interface GamesStats {
+  finishedGames: number;
+  totalGames: number;
+  unfinishedGames: number;
+  abandonedGames: number;
+  liveGames: number;
+  totalPlayers: number;
+  allPlayers: number;
+  totalPlayTime: number;
+  allPlayTime: number;
+  avgPlayTime: number;
+  medianPlayTime: number;
+  longestPlayTime: number;
+  shortestPlayTime: number;
+  errorGames: number;
+  issueGames: number;
 }
 
-export function getStatsByPeriod(since: string): { finishedGames: number; totalGames: number; unfinishedGames: number; abandonedGames: number; liveGames: number; totalPlayers: number; allPlayers: number; totalPlayTime: number; allPlayTime: number; avgPlayTime: number; medianPlayTime: number; longestPlayTime: number } {
-  const finishedGames = (db.prepare("SELECT COUNT(*) as c FROM games WHERE status = 'finished' AND finished_at >= ?").get(since) as any).c;
-  const totalGames = (db.prepare("SELECT COUNT(*) as c FROM games WHERE finished_at >= ?").get(since) as any).c;
-  const unfinishedGames = totalGames - finishedGames;
-  const abandonedGames = (db.prepare("SELECT COUNT(*) as c FROM games WHERE live_status = 'abandoned' AND finished_at >= ?").get(since) as any).c;
-  const liveGames = (db.prepare("SELECT COUNT(*) as c FROM games WHERE live_status = 'live' AND finished_at >= ?").get(since) as any).c;
-  const totalPlayers = (db.prepare("SELECT COALESCE(SUM(player_count), 0) as c FROM games WHERE status = 'finished' AND finished_at >= ?").get(since) as any).c;
-  const allPlayers = (db.prepare("SELECT COALESCE(SUM(player_count), 0) as c FROM games WHERE finished_at >= ?").get(since) as any).c;
-  const totalPlayTime = (db.prepare("SELECT COALESCE(SUM(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL AND finished_at >= ?").get(since) as any).c;
-  const allPlayTime = (db.prepare("SELECT COALESCE(SUM(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL AND finished_at >= ?").get(since) as any).c;
-  const avgPlayTime = (db.prepare("SELECT COALESCE(AVG(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL AND finished_at >= ?").get(since) as any).c;
+export function computeMedian(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
 
-  const durations = db.prepare("SELECT duration_seconds FROM games WHERE duration_seconds IS NOT NULL AND finished_at >= ? ORDER BY duration_seconds").all(since).map((r: any) => r.duration_seconds);
-  let medianPlayTime = 0;
-  if (durations.length > 0) {
-    const mid = Math.floor(durations.length / 2);
-    medianPlayTime = durations.length % 2 === 0 ? (durations[mid - 1] + durations[mid]) / 2 : durations[mid];
+export function getGamesStats(filters: GameFilters = {}): GamesStats {
+  // Total / unfinished / errors / players honor the full filter set (status filter included).
+  const baseScope = buildConditions(filters);
+
+  const totalGames = (db.prepare(`SELECT COUNT(*) as c FROM games g ${baseScope.where}`).get(...baseScope.params) as any).c;
+  const errorGames = countWhere(filters, new Set(), { sql: 'g.has_error = 1', params: [] });
+  const allPlayers = (db.prepare(`SELECT COALESCE(SUM(g.player_count), 0) as c FROM games g ${baseScope.where}`).get(...baseScope.params) as any).c;
+
+  // Finished / abandoned / live counts ignore the status filter so a user filtering
+  // by status=finished still sees how many of the remaining games are live, etc.
+  const statusExcl: Set<FilterDim> = new Set(['status']);
+  const finishedGames = countWhere(filters, statusExcl, { sql: "g.status = 'finished'", params: [] });
+  const abandonedGames = countWhere(filters, statusExcl, { sql: "g.live_status = 'abandoned'", params: [] });
+  const liveGames = countWhere(filters, statusExcl, { sql: "g.live_status = 'live'", params: [] });
+  const unfinishedGames = Math.max(0, totalGames - finishedGames);
+
+  const totalPlayers = (db.prepare(
+    `SELECT COALESCE(SUM(g.player_count), 0) as c FROM games g ${baseScope.where}${baseScope.where ? ' AND' : ' WHERE'} g.status = 'finished'`
+  ).get(...baseScope.params) as any).c;
+
+  // Duration aggregates: only over games with a recorded duration_seconds.
+  const durExtra = { sql: 'g.duration_seconds IS NOT NULL', params: [] as any[] };
+  const durWhere = baseScope.where
+    ? `${baseScope.where} AND ${durExtra.sql}`
+    : `WHERE ${durExtra.sql}`;
+
+  const totalPlayTime = (db.prepare(
+    `SELECT COALESCE(SUM(g.duration_seconds), 0) as c FROM games g ${durWhere}`
+  ).get(...baseScope.params) as any).c;
+  const allPlayTime = totalPlayTime;
+  const avgPlayTime = (db.prepare(
+    `SELECT COALESCE(AVG(g.duration_seconds), 0) as c FROM games g ${durWhere}`
+  ).get(...baseScope.params) as any).c;
+  const longestPlayTime = (db.prepare(
+    `SELECT COALESCE(MAX(g.duration_seconds), 0) as c FROM games g ${durWhere}`
+  ).get(...baseScope.params) as any).c;
+  const shortestPlayTime = (db.prepare(
+    `SELECT COALESCE(MIN(g.duration_seconds), 0) as c FROM games g ${durWhere}`
+  ).get(...baseScope.params) as any).c;
+
+  const durations = db.prepare(
+    `SELECT g.duration_seconds FROM games g ${durWhere}`
+  ).all(...baseScope.params).map((r: any) => r.duration_seconds);
+  const medianPlayTime = computeMedian(durations);
+
+  // Issue count via correlated subquery (room_code → issue_reports), then count distinct games.
+  const issueGames = (db.prepare(
+    `SELECT COUNT(*) as c FROM games g ${baseScope.where}${baseScope.where ? ' AND' : ' WHERE'} g.room_code IS NOT NULL AND EXISTS (SELECT 1 FROM issue_reports ir WHERE ir.room_code = g.room_code)`
+  ).get(...baseScope.params) as any).c;
+
+  return {
+    finishedGames, totalGames, unfinishedGames, abandonedGames, liveGames,
+    totalPlayers, allPlayers, totalPlayTime, allPlayTime,
+    avgPlayTime: Math.round(avgPlayTime),
+    medianPlayTime: Math.round(medianPlayTime),
+    longestPlayTime, shortestPlayTime,
+    errorGames, issueGames,
+  };
+}
+
+// Backwards-compatible wrappers — preserved for any external callers.
+export function getStats(): GamesStats {
+  return getGamesStats({});
+}
+
+export function getStatsByPeriod(since: string): GamesStats {
+  return getGamesStats({ dateFrom: since });
+}
+
+export interface GameStateDuration {
+  state: string;
+  count: number;
+  avg_seconds: number;
+  median_seconds: number;
+  total_seconds: number;
+}
+
+// Map a raw event.phase string into one of the base groups in STATUS_GROUPS.
+// Exported so the algorithm and the mapping can be unit-tested independently of the DB.
+export function mapPhaseToGroup(phase: string | null | undefined): string | null {
+  if (!phase) return null;
+  for (const [groupKey, members] of Object.entries(STATUS_GROUPS)) {
+    if (members.includes(phase)) return groupKey;
   }
+  return 'other';
+}
 
-  const longestPlayTime = (db.prepare("SELECT COALESCE(MAX(duration_seconds), 0) as c FROM games WHERE duration_seconds IS NOT NULL AND finished_at >= ?").get(since) as any).c;
+export interface PhaseEventRow {
+  game_id: string;
+  finished_at: string | null;
+  phase: string;
+  created_at: string;
+}
 
-  return { finishedGames, totalGames, unfinishedGames, abandonedGames, liveGames, totalPlayers, allPlayers, totalPlayTime, allPlayTime, avgPlayTime: Math.round(avgPlayTime), medianPlayTime: Math.round(medianPlayTime), longestPlayTime };
+// Pure walker — given event rows ordered by (game_id, created_at), return the
+// list of phase-durations (in seconds, grouped by base state). Extracted from
+// getGameStateDurations so it's testable without a DB.
+export function walkPhaseDurations(rows: PhaseEventRow[]): Record<string, number[]> {
+  const buckets: Record<string, number[]> = {
+    lobby: [], die: [], living: [], bye: [], eulogy: [], finished: [], other: [],
+  };
+
+  let curGame: string | null = null;
+  let curPhase: string | null = null;
+  let curPhaseStart: number | null = null;
+  let lastGameFinishedAt: string | null = null;
+
+  const record = (phase: string | null, startMs: number | null, endMs: number) => {
+    if (!phase || startMs == null) return;
+    const dur = Math.round((endMs - startMs) / 1000);
+    if (!Number.isFinite(dur) || dur < 0) return;
+    const group = mapPhaseToGroup(phase);
+    if (group && buckets[group]) buckets[group].push(dur);
+  };
+
+  const flushFinalPhase = () => {
+    if (!curPhase || curPhaseStart == null) return;
+    if (!lastGameFinishedAt) return;
+    const endMs = Date.parse(lastGameFinishedAt);
+    if (!Number.isFinite(endMs) || endMs < curPhaseStart) return;
+    record(curPhase, curPhaseStart, endMs);
+  };
+
+  for (const r of rows) {
+    const ts = Date.parse(r.created_at);
+    if (!Number.isFinite(ts)) continue;
+
+    if (r.game_id !== curGame) {
+      flushFinalPhase();
+      curGame = r.game_id;
+      lastGameFinishedAt = r.finished_at;
+      curPhase = r.phase;
+      curPhaseStart = ts;
+      continue;
+    }
+
+    if (r.phase !== curPhase) {
+      record(curPhase, curPhaseStart, ts);
+      curPhase = r.phase;
+      curPhaseStart = ts;
+    }
+  }
+  flushFinalPhase();
+
+  return buckets;
+}
+
+export function summariseStateBuckets(buckets: Record<string, number[]>): GameStateDuration[] {
+  const orderedKeys = ['lobby', 'die', 'living', 'bye', 'eulogy', 'finished', 'other'];
+  return orderedKeys.map(state => {
+    const vals = buckets[state] || [];
+    const sum = vals.reduce((a, b) => a + b, 0);
+    return {
+      state,
+      count: vals.length,
+      avg_seconds: vals.length > 0 ? Math.round(sum / vals.length) : 0,
+      median_seconds: Math.round(computeMedian(vals)),
+      total_seconds: sum,
+    };
+  });
+}
+
+export function getGameStateDurations(filters: GameFilters = {}): GameStateDuration[] {
+  const baseScope = buildConditions(filters);
+  const rows = db.prepare(`
+    SELECT g.id as game_id, g.finished_at as finished_at,
+           e.phase as phase, e.created_at as created_at
+    FROM games g
+    INNER JOIN game_events e ON e.game_id = g.id
+    ${baseScope.where}${baseScope.where ? ' AND' : ' WHERE'} e.phase IS NOT NULL AND e.phase != ''
+    ORDER BY g.id, e.created_at, e.id
+  `).all(...baseScope.params) as PhaseEventRow[];
+
+  return summariseStateBuckets(walkPhaseDurations(rows));
 }
 
 export type UserStatsDevFilter = 'all' | 'dev' | 'nodev';
