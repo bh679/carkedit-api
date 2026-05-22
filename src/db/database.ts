@@ -530,9 +530,10 @@ export interface GameFilters {
   hideRaw?: string[];
   hideDurationBuckets?: string[];
   hidePlayerCounts?: string[];
+  playerName?: string;
 }
 
-type FilterDim = 'date' | 'errors' | 'dev' | 'status' | 'groups' | 'raw' | 'duration' | 'players';
+type FilterDim = 'date' | 'errors' | 'dev' | 'status' | 'groups' | 'raw' | 'duration' | 'players' | 'playerName';
 
 function durationBucketCondition(key: string): { sql: string; params: any[] } | null {
   if (key === 'unknown') return { sql: 'g.duration_seconds IS NULL', params: [] };
@@ -595,6 +596,10 @@ function buildConditions(filters: GameFilters, exclude: Set<FilterDim> = new Set
       conditions.push('g.player_count != ?');
       params.push(n);
     }
+  }
+  if (!exclude.has('playerName') && filters.playerName) {
+    conditions.push('EXISTS (SELECT 1 FROM game_players gp WHERE gp.game_id = g.id AND LOWER(TRIM(gp.player_name)) = ?)');
+    params.push(filters.playerName.trim().toLowerCase());
   }
 
   const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
