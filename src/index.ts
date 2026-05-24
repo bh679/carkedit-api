@@ -24,6 +24,7 @@ import { DEFAULT_STYLE } from "./services/image-gen/default-style.js";
 import githubProxyRouter from "./routes/github-proxy.js";
 import adminDeployTokenRouter from "./routes/admin-deploy-token.js";
 import { validateOptionalString, validateEnum, coerceWinner, coerceGamePlayer } from "./utils/validation.js";
+import { postWebhookEmbed, buildGameFinishEmbed } from "./services/discord/webhook.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "4500", 10);
@@ -122,11 +123,24 @@ const server = defineServer({
             "https://www.gstatic.com", "https://raw.githubusercontent.com", "https://unpkg.com",
             "https://play.carkedit.com", "https://staging.play.carkedit.com", "https://dev.play.carkedit.com",
           ],
-          frameSrc: ["'self'", "https://*.firebaseapp.com", "https://accounts.google.com"],
+          // Sibling carkedit hosts in frame-src so the stats-page "preview
+          // production data" toggle can sign in via the secondary Firebase
+          // app — Firebase loads a hidden /__/auth/iframe on the prod host
+          // from a staging/dev page, which would otherwise be blocked here.
+          // Mirrors what connectSrc already does for cross-origin fetches.
+          frameSrc: [
+            "'self'", "https://*.firebaseapp.com", "https://accounts.google.com",
+            "https://play.carkedit.com", "https://staging.play.carkedit.com", "https://dev.play.carkedit.com",
+          ],
         },
       },
       hsts: { maxAge: 31536000, includeSubDomains: true },
       frameguard: { action: "deny" },
+      // Firebase signInWithPopup needs window.opener to survive the OAuth
+      // redirect to accounts.google.com. Helmet's default `same-origin` severs
+      // that reference cross-origin, which makes Firebase's postMessage
+      // handshake fail and surface `auth/popup-closed-by-user` even on success.
+      crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
     }));
 
     // Note: Colyseus already attaches a permissive CORS handler at the HTTP
@@ -340,6 +354,27 @@ const server = defineServer({
 
         const id = saveGameResult(result);
         res.json({ id, status: "saved" });
+
+        if (!result.is_dev) {
+          try {
+            const durationSeconds = result.started_at && result.finished_at
+              ? Math.round((new Date(result.finished_at).getTime() - new Date(result.started_at).getTime()) / 1000)
+              : null;
+            const embed = buildGameFinishEmbed({
+              mode: result.mode === "online" ? "online" : "local",
+              hostName: result.host_name || null,
+              winnerName: result.winner_name || null,
+              winnerScore: result.winner_score ?? null,
+              playerCount: result.player_count,
+              rounds: result.rounds,
+              durationSeconds,
+              apiVersion: pkg.version,
+            });
+            postWebhookEmbed(embed).catch(() => { /* never throws */ });
+          } catch (notifyErr) {
+            console.warn("[CarkedIt API] discord notify (local finish) failed:", notifyErr);
+          }
+        }
       } catch (err) {
         console.error("[CarkedIt API] Save game error:", err);
         res.status(500).json({ error: "Failed to save game" });
