@@ -12,6 +12,7 @@ import { handleStartEulogyRound, handleSelectEulogist, handleConfirmEulogists, h
 import { ROOM_CODE_WORDS } from "./roomWords.js";
 import { saveGameResult, saveCardPlays, saveCardDraws, saveGameEvent, backfillGameId, createLiveGame, updateLiveGame, completeLiveGame, abandonGame } from "../db/database.js";
 import type { GameResult, CardPlay, CardDraw, GameEvent } from "../db/types.js";
+import { postWebhookEmbed, buildGameStartEmbed, buildGameFinishEmbed } from "../services/discord/webhook.js";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -553,6 +554,25 @@ export class GameRoom extends Room<{ state: GameState }> {
         durationSeconds,
         playerCount: sorted.length,
       });
+
+      if (!this.state.devMode) {
+        try {
+          const embed = buildGameFinishEmbed({
+            mode: "online",
+            roomCode: this.state.roomCode || null,
+            hostName: hostPlayer?.name || null,
+            winnerName: sorted[0]?.name || null,
+            winnerScore: sorted[0]?.score ?? null,
+            playerCount: sorted.length,
+            rounds: this.state.rounds,
+            durationSeconds: durationSeconds ?? null,
+            apiVersion: apiPkg.version,
+          });
+          postWebhookEmbed(embed).catch(() => { /* never throws, defensive */ });
+        } catch (err) {
+          console.warn(`[GameRoom] discord notify (finish) failed:`, err);
+        }
+      }
     } catch (err) {
       console.error("[GameRoom] Failed to save game result:", err);
     }
@@ -701,6 +721,22 @@ export class GameRoom extends Room<{ state: GameState }> {
         enableEulogy: this.state.enableEulogy,
       },
     });
+
+    if (!this.state.devMode) {
+      try {
+        const hostPlayer = this.state.hostId ? this.state.players.get(this.state.hostId) : null;
+        const embed = buildGameStartEmbed({
+          mode: "online",
+          roomCode: this.state.roomCode || null,
+          hostName: hostPlayer?.name || null,
+          playerCount: this.state.players.size,
+          apiVersion: apiPkg.version,
+        });
+        postWebhookEmbed(embed).catch(() => { /* never throws, defensive */ });
+      } catch (err) {
+        console.warn(`[GameRoom] discord notify (start) failed:`, err);
+      }
+    }
 
     console.log(`[GameRoom] Phase: die_phase — ${this.state.currentTurn}'s turn`);
   }
