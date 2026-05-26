@@ -1,6 +1,30 @@
 import { GameState } from "../schema/GameState.js";
+import { Card } from "../schema/Card.js";
 import { Client } from "colyseus";
 import { transitionToEulogy } from "./EulogyPhase.js";
+
+/**
+ * Creates a fresh Card schema instance that mirrors `src`. Used by handleSwapCard
+ * so that the values pushed into submittedCards/hand are clean schema instances
+ * — moving the SAME Schema instance between ArraySchema containers can confuse
+ * client-side onAdd/listen tracking, so we discard the originals and push clones.
+ */
+function cloneCard(src: Card): Card {
+  const c = new Card();
+  c.id = src.id;
+  c.text = src.text;
+  c.deck = src.deck;
+  c.faceUp = src.faceUp;
+  c.submittedBy = src.submittedBy;
+  c.special = src.special;
+  c.packId = src.packId;
+  c.prompt = src.prompt;
+  c.image_url = src.image_url;
+  c.text_position = src.text_position;
+  c.text_color = src.text_color;
+  for (const opt of src.options) c.options.push(opt);
+  return c;
+}
 
 export function handleSubmitCard(state: GameState, client: Client, cardIndex: number): void {
   // Validate phase is living_submit or bye_submit
@@ -36,6 +60,47 @@ export function handleSubmitCard(state: GameState, client: Client, cardIndex: nu
   if (allPlayersSubmitted(state)) {
     transitionToReveal(state);
   }
+}
+
+export function handleSwapCard(state: GameState, client: Client, cardIndex: number): void {
+  const validPhases = ["living_submit", "bye_submit"];
+  if (!validPhases.includes(state.phase)) return;
+  if (state.currentLivingDead === client.sessionId) return;
+
+  const player = state.players.get(client.sessionId);
+  if (!player) return;
+  if (!player.hasSubmitted) return;
+  if (cardIndex < 0 || cardIndex >= player.hand.length) return;
+
+  const oldIndex = state.submittedCards.findIndex(
+    (c) => c.submittedBy === client.sessionId,
+  );
+  if (oldIndex < 0) return;
+
+  const oldOriginal = state.submittedCards[oldIndex];
+  const newOriginal = player.hand[cardIndex];
+  if (!oldOriginal || !newOriginal) return;
+
+  // Build fresh Card instances. Moving the SAME schema instance between
+  // ArraySchema containers can suppress client-side onAdd events (Colyseus
+  // can treat it as a "move" and skip re-attaching listeners), which leaves
+  // later faceUp changes unobserved — that is the bug "swapped card doesn't
+  // turn around when revealed during pitching".
+  const swappedIntoSubmitted = cloneCard(newOriginal);
+  swappedIntoSubmitted.faceUp = false;
+  swappedIntoSubmitted.submittedBy = client.sessionId;
+
+  const returnedToHand = cloneCard(oldOriginal);
+  returnedToHand.faceUp = false;
+  returnedToHand.submittedBy = "";
+
+  // Replace the slots in place. splice(idx, 1, item) keeps the array length
+  // and index stable, which keeps client-side data-reveal-index pointers
+  // pointing at the same logical slot.
+  state.submittedCards.splice(oldIndex, 1, swappedIntoSubmitted);
+  player.hand.splice(cardIndex, 1, returnedToHand);
+
+  console.log(`[LivingPhase] ${player.name} swapped their submitted card`);
 }
 
 export function handleRevealSubmission(state: GameState, client: Client): void {
