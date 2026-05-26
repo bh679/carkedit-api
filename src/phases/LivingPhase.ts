@@ -440,10 +440,14 @@ function transitionToSelect(state: GameState): void {
   state.currentTurn = state.currentLivingDead;
 }
 
-function getFirstNonLivingDead(state: GameState): string | null {
-  for (let i = 0; i < state.turnOrder.length; i++) {
-    const playerId = state.turnOrder[i];
-    if (playerId === state.currentLivingDead) continue;
+// Pitch order rule: the first pitcher is the player immediately after The Living Dead
+// (clockwise/seat order in turnOrder), then continues clockwise, wrapping past the LD.
+export function getFirstNonLivingDead(state: GameState): string | null {
+  const ldIndex = state.turnOrder.indexOf(state.currentLivingDead);
+  if (ldIndex === -1) return null;
+  const n = state.turnOrder.length;
+  for (let offset = 1; offset < n; offset++) {
+    const playerId = state.turnOrder[(ldIndex + offset) % n];
     // Skip late joiners who haven't submitted (no card to convince with)
     const hasSubmittedCard = state.submittedCards.some(
       (card) => card.submittedBy === playerId
@@ -455,14 +459,18 @@ function getFirstNonLivingDead(state: GameState): string | null {
   return null;
 }
 
-function getNextConvincer(state: GameState): string | null {
-  // Find current convincer's index, then look for next non-Living-Dead player
-  // whose card hasn't been revealed yet
+export function getNextConvincer(state: GameState): string | null {
+  // Walk forward from the current convincer modulo turnOrder.length, skipping
+  // The Living Dead, until we find a player whose card is still face-down.
+  const ldIndex = state.turnOrder.indexOf(state.currentLivingDead);
   const currentIndex = state.turnOrder.indexOf(state.convincingTurn);
+  if (ldIndex === -1 || currentIndex === -1) return null;
+  const n = state.turnOrder.length;
 
-  for (let i = currentIndex + 1; i < state.turnOrder.length; i++) {
-    const playerId = state.turnOrder[i];
-    if (playerId === state.currentLivingDead) continue;
+  for (let offset = 1; offset < n; offset++) {
+    const idx = (currentIndex + offset) % n;
+    if (idx === ldIndex) continue;
+    const playerId = state.turnOrder[idx];
 
     // Check if they have an unrevealed submitted card
     const hasUnrevealedCard = state.submittedCards.some(
