@@ -250,7 +250,7 @@ export function initDatabase(): void {
       amount_usd REAL NOT NULL,
       period_start TEXT NOT NULL,
       period_end TEXT NOT NULL,
-      environment TEXT NOT NULL DEFAULT 'play',
+      environment TEXT NOT NULL DEFAULT 'prod',
       source TEXT NOT NULL DEFAULT 'manual',
       source_ref TEXT UNIQUE,
       entered_by TEXT,

@@ -996,7 +996,7 @@ const server = defineServer({
         // Environment breakdown: this box's own generation_log counts as its
         // DEPLOY_ENV; remote reports from the other envs come from cost_entries.
         const envBreakdown = getCostByEnvironment();
-        const localEnv = process.env.DEPLOY_ENV || 'play';
+        const localEnv = process.env.DEPLOY_ENV || 'prod';
         const byEnvironment: Record<string, { total_usd: number; count: number }> = {};
         byEnvironment[localEnv] = { total_usd: allTime.total_usd, count: allTime.count };
         for (const row of envBreakdown) {
@@ -1050,7 +1050,7 @@ const server = defineServer({
     // ── Cost Reporting: server-to-server (dev/staging → play) ──────
     // Key-gated (NOT Firebase): the dev/staging boxes POST here after each
     // generation so the central (play) dashboard can show per-env image-gen costs.
-    const COST_ENV_ALLOWLIST = ['dev', 'staging', 'play'];
+    const COST_ENV_ALLOWLIST = ['dev', 'staging', 'prod'];
     app.post("/api/carkedit/costs/report", publicWriteLimiter, publicBodyLimit, (req: any, res: any) => {
       try {
         const key = req.headers["x-cost-report-key"];
@@ -1191,7 +1191,7 @@ const server = defineServer({
               const val = raw.includes("$") ? raw.slice(raw.indexOf("$") + 1) : raw;
               const env = val ? val : "untagged";
               const amount = parseFloat(group.Metrics?.UnblendedCost?.Amount || "0");
-              if (amount === 0) continue;
+              if (Math.abs(amount) < 0.005) continue; // skip $0 / negligible credits
               if (!envTotals[env]) envTotals[env] = { total: 0, current: 0 };
               envTotals[env].total += amount;
               if (month === curMonth) envTotals[env].current += amount;
@@ -1712,7 +1712,7 @@ const server = defineServer({
 
           // Fire-and-forget: report this cost to the central (play) server.
           // Only dev/staging report (they set COST_REPORT_URL); play never reports to itself.
-          if (process.env.DEPLOY_ENV && process.env.DEPLOY_ENV !== 'play' && process.env.COST_REPORT_URL) {
+          if (process.env.DEPLOY_ENV && process.env.DEPLOY_ENV !== 'prod' && process.env.COST_REPORT_URL) {
             fetch(process.env.COST_REPORT_URL, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'X-Cost-Report-Key': process.env.COST_REPORT_KEY || '' },
@@ -1868,7 +1868,7 @@ const server = defineServer({
 
           // Fire-and-forget: report this cost to the central (play) server.
           // Only dev/staging report (they set COST_REPORT_URL); play never reports to itself.
-          if (process.env.DEPLOY_ENV && process.env.DEPLOY_ENV !== 'play' && process.env.COST_REPORT_URL) {
+          if (process.env.DEPLOY_ENV && process.env.DEPLOY_ENV !== 'prod' && process.env.COST_REPORT_URL) {
             fetch(process.env.COST_REPORT_URL, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'X-Cost-Report-Key': process.env.COST_REPORT_KEY || '' },

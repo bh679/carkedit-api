@@ -1,5 +1,5 @@
 #!/usr/bin/env npx tsx
-// Backfill historical generation_log costs to the central (play) cost_entries.
+// Backfill historical generation_log costs to the central (prod) cost_entries.
 //
 // Manually triggered — run on each dev/staging box after deploying the
 // cost-reporting feature. Safe to run multiple times (idempotent via the
@@ -27,8 +27,8 @@ if (!COST_REPORT_URL || !COST_REPORT_KEY || !DEPLOY_ENV) {
   process.exit(1);
 }
 
-if (DEPLOY_ENV === "play") {
-  console.error("Cannot backfill from play (production) to itself.");
+if (DEPLOY_ENV === "prod") {
+  console.error("Cannot backfill from prod (production) to itself.");
   process.exit(1);
 }
 

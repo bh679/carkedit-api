@@ -42,7 +42,7 @@ export function createCostEntry(entry: {
     entry.amount_usd,
     entry.period_start,
     entry.period_end,
-    entry.environment ?? "play",
+    entry.environment ?? "prod",
     entry.source ?? "manual",
     entry.source_ref ?? null,
     entry.entered_by ?? null,
