@@ -14,6 +14,7 @@ import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, co
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag, setUserRole } from "./db/users.js";
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, setPackBaseCost, getPackStats, listPackStatsAll } from "./db/packs.js";
 import { createGenerationLog, listGenerationLog, mergeLogEntries } from "./db/generation-log.js";
+import { createCostEntry, getCostByEnvironment } from "./db/cost-entries.js";
 import { optionalAuth, requireAuth, requireAdmin, requireQA, setFirebaseAvailable, isFirebaseAvailable } from "./middleware/auth.js";
 import { isRole } from "./auth/roles.js";
 import { publicWriteLimiter, publicBodyLimit } from "./middleware/rate-limit.js";
@@ -992,6 +993,21 @@ const server = defineServer({
           byMonth[row.month].providers[row.provider] = row.total_usd;
         }
 
+        // Environment breakdown: this box's own generation_log counts as its
+        // DEPLOY_ENV; remote reports from the other envs come from cost_entries.
+        const envBreakdown = getCostByEnvironment();
+        const localEnv = process.env.DEPLOY_ENV || 'play';
+        const byEnvironment: Record<string, { total_usd: number; count: number }> = {};
+        byEnvironment[localEnv] = { total_usd: allTime.total_usd, count: allTime.count };
+        for (const row of envBreakdown) {
+          if (byEnvironment[row.environment]) {
+            byEnvironment[row.environment].total_usd += row.total_usd;
+            byEnvironment[row.environment].count += row.count;
+          } else {
+            byEnvironment[row.environment] = { total_usd: row.total_usd, count: row.count };
+          }
+        }
+
         res.json({
           totals: {
             all_time_usd: allTime.total_usd,
@@ -1006,6 +1022,11 @@ const server = defineServer({
             total_usd: data.total_usd,
             count: data.count,
             providers: data.providers,
+          })),
+          by_environment: Object.entries(byEnvironment).map(([environment, data]) => ({
+            environment,
+            total_usd: data.total_usd,
+            count: data.count,
           })),
         });
       } catch (err) {
@@ -1023,6 +1044,54 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Cost image-gen error:", err);
         res.status(500).json({ error: "Failed to retrieve image gen costs" });
+      }
+    });
+
+    // ── Cost Reporting: server-to-server (dev/staging → play) ──────
+    // Key-gated (NOT Firebase): the dev/staging boxes POST here after each
+    // generation so the central (play) dashboard can show per-env image-gen costs.
+    const COST_ENV_ALLOWLIST = ['dev', 'staging', 'play'];
+    app.post("/api/carkedit/costs/report", publicWriteLimiter, publicBodyLimit, (req: any, res: any) => {
+      try {
+        const key = req.headers["x-cost-report-key"];
+        if (!process.env.COST_REPORT_KEY || key !== process.env.COST_REPORT_KEY) {
+          return res.status(401).json({ error: "Invalid or missing report key" });
+        }
+        const { environment, provider, cost_usd, tokens_used, description, timestamp, log_id } = req.body || {};
+        if (!environment || !provider || cost_usd == null || !log_id) {
+          return res.status(400).json({ error: "Missing required fields: environment, provider, cost_usd, log_id" });
+        }
+        if (!COST_ENV_ALLOWLIST.includes(String(environment))) {
+          return res.status(400).json({ error: `Invalid environment (expected one of: ${COST_ENV_ALLOWLIST.join(', ')})` });
+        }
+        const amount = Number(cost_usd);
+        if (!Number.isFinite(amount) || amount < 0) {
+          return res.status(400).json({ error: "cost_usd must be a finite number >= 0" });
+        }
+        const ts = timestamp ? new Date(timestamp) : new Date();
+        if (isNaN(ts.getTime())) {
+          return res.status(400).json({ error: "Invalid timestamp" });
+        }
+        const periodDay = ts.toISOString().slice(0, 10);
+        const desc = typeof description === 'string' && description.trim()
+          ? description.trim().slice(0, 200)
+          : `${String(provider).slice(0, 60)} generation (${environment})`;
+        const entry = createCostEntry({
+          service: "image_gen",
+          category: "generation",
+          description: desc,
+          amount_usd: amount,
+          period_start: periodDay,
+          period_end: periodDay,
+          environment: String(environment),
+          source: "remote_report",
+          source_ref: `${environment}:${log_id}`,
+          entered_by: `${environment}-server`,
+        });
+        res.json({ ok: true, created: entry !== null });
+      } catch (err) {
+        console.error("[CarkedIt API] Cost report error:", err);
+        res.status(500).json({ error: "Failed to process cost report" });
       }
     });
 
@@ -1100,6 +1169,42 @@ const server = defineServer({
           return sum + Math.max(cost, actualMonthlyCost);
         }, curMonthEntry?.total_usd || 0);
 
+        // ── Per-environment breakdown via the `Environment` cost-allocation tag.
+        // Requires the tag to be activated in AWS Billing (~24-48h lag, forward-only);
+        // until then this query returns nothing and the dashboard shows no per-env server data.
+        let byEnvironment: { environment: string; total_usd: number; current_month_usd: number }[] = [];
+        try {
+          const envCmd = new awsSdk.GetCostAndUsageCommand({
+            TimePeriod: { Start: fmt(start), End: fmt(end) },
+            Granularity: "MONTHLY",
+            Metrics: ["UnblendedCost"],
+            GroupBy: [{ Type: "TAG", Key: "Environment" }],
+            Filter: { Tags: { Key: "CarkedIt", Values: [""], MatchOptions: ["EQUALS"] } },
+          });
+          const envResult = await client.send(envCmd);
+          const envTotals: Record<string, { total: number; current: number }> = {};
+          for (const period of envResult.ResultsByTime || []) {
+            const month = (period.TimePeriod?.Start || "").slice(0, 7);
+            for (const group of period.Groups || []) {
+              // Tag group keys arrive as "Environment$dev" / "Environment$" (untagged).
+              const raw = group.Keys?.[0] || "";
+              const val = raw.includes("$") ? raw.slice(raw.indexOf("$") + 1) : raw;
+              const env = val ? val : "untagged";
+              const amount = parseFloat(group.Metrics?.UnblendedCost?.Amount || "0");
+              if (amount === 0) continue;
+              if (!envTotals[env]) envTotals[env] = { total: 0, current: 0 };
+              envTotals[env].total += amount;
+              if (month === curMonth) envTotals[env].current += amount;
+            }
+          }
+          byEnvironment = Object.entries(envTotals)
+            .map(([environment, v]) => ({ environment, total_usd: v.total, current_month_usd: v.current }))
+            .sort((a, b) => b.total_usd - a.total_usd);
+        } catch (envErr: any) {
+          // Tag not activated yet, or grouping unsupported — degrade gracefully to empty.
+          console.warn("[CarkedIt API] AWS per-env tag query failed (Environment tag may not be activated yet):", envErr?.message);
+        }
+
         res.json({
           configured: true,
           totals: {
@@ -1117,6 +1222,7 @@ const server = defineServer({
             }))
             .sort((a, b) => b.total_usd - a.total_usd),
           by_month: monthlyData.sort((a, b) => b.month.localeCompare(a.month)),
+          by_environment: byEnvironment,
           projected_costs: AWS_PROJECTED_COSTS,
           fetched_at: new Date().toISOString(),
         });
@@ -1603,6 +1709,24 @@ const server = defineServer({
             card_id: typeof card_id === 'string' && card_id ? card_id : null,
           });
           logId = logRow.id;
+
+          // Fire-and-forget: report this cost to the central (play) server.
+          // Only dev/staging report (they set COST_REPORT_URL); play never reports to itself.
+          if (process.env.DEPLOY_ENV && process.env.DEPLOY_ENV !== 'play' && process.env.COST_REPORT_URL) {
+            fetch(process.env.COST_REPORT_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Cost-Report-Key': process.env.COST_REPORT_KEY || '' },
+              body: JSON.stringify({
+                environment: process.env.DEPLOY_ENV,
+                provider: result.provider,
+                cost_usd: result.costUsd ?? 0,
+                tokens_used: result.tokensUsed ?? null,
+                description: `${result.provider} generation (${process.env.DEPLOY_ENV})`,
+                timestamp: new Date().toISOString(),
+                log_id: logRow.id,
+              }),
+            }).catch(() => {}); // never fail the generation
+          }
         } catch (err: any) {
           console.error("[CarkedIt API] auto-save generation failed:", err);
           logWarning = err?.message || 'auto-save failed';
@@ -1741,6 +1865,24 @@ const server = defineServer({
             card_id: typeof card_id === 'string' && card_id ? card_id : null,
           });
           logId = logRow.id;
+
+          // Fire-and-forget: report this cost to the central (play) server.
+          // Only dev/staging report (they set COST_REPORT_URL); play never reports to itself.
+          if (process.env.DEPLOY_ENV && process.env.DEPLOY_ENV !== 'play' && process.env.COST_REPORT_URL) {
+            fetch(process.env.COST_REPORT_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Cost-Report-Key': process.env.COST_REPORT_KEY || '' },
+              body: JSON.stringify({
+                environment: process.env.DEPLOY_ENV,
+                provider: result.provider,
+                cost_usd: result.costUsd ?? 0,
+                tokens_used: result.tokensUsed ?? null,
+                description: `${result.provider} generation (${process.env.DEPLOY_ENV})`,
+                timestamp: new Date().toISOString(),
+                log_id: logRow.id,
+              }),
+            }).catch(() => {}); // never fail the generation
+          }
         } catch (err: any) {
           console.error("[CarkedIt API] auto-save generation (stream) failed:", err);
           logWarning = err?.message || 'auto-save failed';
