@@ -268,6 +268,13 @@ export function initDatabase(): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_mailing_email ON mailing_list(email);
+
+    CREATE TABLE IF NOT EXISTS page_permissions (
+      path TEXT PRIMARY KEY,
+      min_role TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_by_user_id TEXT
+    );
   `);
 
   // Migrate: add new columns if they don't exist (for existing DBs)

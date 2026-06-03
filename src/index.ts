@@ -12,6 +12,7 @@ import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
 import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameFilterCounts, getGameById, getStats, getStatsByPeriod, getGamesStats, getGameStateDurations, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev, saveMailingListEntry, getUserGameStats } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag, setUserRole } from "./db/users.js";
+import { listPagePermissions, setPagePermission } from "./db/page-permissions.js";
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, setPackBaseCost, getPackStats, listPackStatsAll } from "./db/packs.js";
 import { createGenerationLog, listGenerationLog, mergeLogEntries } from "./db/generation-log.js";
 import { createCostEntry, getCostByEnvironment } from "./db/cost-entries.js";
@@ -713,6 +714,35 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Set role error:", err);
         res.status(500).json({ error: "Failed to update role" });
+      }
+    });
+
+    // Page permissions: per-page min-role overrides for client-side nav and page gates.
+    // The list of pages itself lives in the client (carkedit-online/js/config/pages.js).
+    // This endpoint stores only the overrides; the client merges with its static defaults.
+    app.get("/api/carkedit/page-permissions", (_req: any, res: any) => {
+      try {
+        res.json({ overrides: listPagePermissions() });
+      } catch (err) {
+        console.error("[CarkedIt API] List page permissions error:", err);
+        res.status(500).json({ error: "Failed to list page permissions" });
+      }
+    });
+
+    app.patch("/api/carkedit/admin/page-permissions", requireAdmin(), (req: any, res: any) => {
+      try {
+        const { path: pagePath, minRole } = req.body ?? {};
+        if (!pagePath || typeof pagePath !== 'string' || pagePath.length > 200) {
+          return res.status(400).json({ error: "path is required" });
+        }
+        if (!isRole(minRole)) {
+          return res.status(400).json({ error: "minRole must be one of Player, Host, QA, Admin" });
+        }
+        const updated = setPagePermission(pagePath, minRole, req.localUser!.id);
+        res.json(updated);
+      } catch (err) {
+        console.error("[CarkedIt API] Set page permission error:", err);
+        res.status(500).json({ error: "Failed to update page permission" });
       }
     });
 
