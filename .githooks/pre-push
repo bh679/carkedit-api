@@ -1,0 +1,34 @@
+#!/bin/sh
+# .githooks/pre-push
+#
+# Refuses to push carkedit deploy-trigger tags from a clone.
+#
+# In carkedit, version tags ARE deploys — pushing one ships immediately:
+#   refs/tags/v<digit>...  -> deploy-production.yml -> play.carkedit.com
+#   refs/tags/vs...        -> deploy-staging.yml    -> staging.play.carkedit.com
+#
+# Release tags are created ONLY by the Promote Build buttons on the deploy
+# dashboard, which tag through the GitHub API (POST /git/refs) — never by
+# `git push`. So a clone should never push a v*/vs* tag. See CLAUDE.md.
+#
+# git feeds one line per ref on stdin: <local-ref> <local-sha> <remote-ref> <remote-sha>
+
+blocked=0
+while read -r _localref _localsha remoteref _remotesha; do
+	case "$remoteref" in
+		refs/tags/vs* | refs/tags/v[0-9]*)
+			echo "  refused: $remoteref (deploy trigger)" >&2
+			blocked=1
+			;;
+	esac
+done
+
+if [ "$blocked" -ne 0 ]; then
+	echo "" >&2
+	echo "pre-push blocked: pushing v*/vs* tags deploys carkedit to staging/production." >&2
+	echo "Promote builds via the deploy dashboard buttons (dev->staging, staging->prod)," >&2
+	echo "which create tags through the GitHub API. To override deliberately:" >&2
+	echo "  git push --no-verify" >&2
+	exit 1
+fi
+exit 0
