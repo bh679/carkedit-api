@@ -71,11 +71,66 @@ export function getUserById(id: string): User | null {
   return user ?? null;
 }
 
+/**
+ * Account reconciliation by verified email.
+ *
+ * When a Firebase sign-in presents a `firebase_uid` we have never seen, but
+ * whose VERIFIED email already belongs to an existing account, bind the new
+ * UID onto that account instead of minting a duplicate `Host` row. Firebase
+ * issues a distinct UID per identity, so without this a second sign-in method
+ * for the same person (e.g. Google + email/password) silently creates a fresh
+ * account and orphans their real role/admin.
+ *
+ * Security: only ever reconciles when `email_verified` is true, so an
+ * UNVERIFIED email/password signup can never adopt (take over) someone else's
+ * account. Callers MUST pass the email + verification flag straight from the
+ * decoded Firebase token, never a client-supplied value.
+ *
+ * Returns the adopted (re-bound) row, or null when there is no safe match.
+ */
+function adoptAccountByVerifiedEmail(params: {
+  firebase_uid: string;
+  email?: string | null;
+  email_verified?: boolean;
+  display_name?: string | null;
+  avatar_url?: string | null;
+}): User | null {
+  const { firebase_uid, email, email_verified, display_name, avatar_url } = params;
+  if (!email || !email_verified) return null;
+
+  const db = getDb();
+  // Strongest same-email account wins: admins first, then by role rank, then
+  // oldest. Skip any row already bound to this UID.
+  const canonical = db.prepare(`
+    SELECT * FROM users
+    WHERE lower(email) = lower(?) AND (firebase_uid IS NULL OR firebase_uid != ?)
+    ORDER BY is_admin DESC,
+             CASE role WHEN 'Admin' THEN 3 WHEN 'QA' THEN 2 WHEN 'Host' THEN 1 ELSE 0 END DESC,
+             created_at ASC
+    LIMIT 1
+  `).get(email, firebase_uid) as User | undefined;
+  if (!canonical) return null;
+
+  // Re-bind this UID onto the canonical account and refresh profile fields,
+  // but never touch role / is_admin.
+  db.prepare(`
+    UPDATE users SET
+      firebase_uid = ?,
+      display_name = COALESCE(?, display_name),
+      avatar_url = COALESCE(?, avatar_url),
+      updated_at = datetime('now')
+    WHERE id = ?
+  `).run(firebase_uid, display_name ?? null, avatar_url ?? null, canonical.id);
+
+  return db.prepare('SELECT * FROM users WHERE id = ?').get(canonical.id) as User;
+}
+
 export function upsertUserFromFirebase(firebaseUser: {
   uid: string;
   email?: string;
   name?: string;
   picture?: string;
+  email_verified?: boolean;
 }): User {
   const db = getDb();
   const existing = db.prepare('SELECT * FROM users WHERE firebase_uid = ?').get(firebaseUser.uid) as User | undefined;
@@ -91,6 +146,18 @@ export function upsertUserFromFirebase(firebaseUser: {
     `).run(firebaseUser.name ?? null, firebaseUser.email ?? null, firebaseUser.picture ?? null, firebaseUser.uid);
     return db.prepare('SELECT * FROM users WHERE firebase_uid = ?').get(firebaseUser.uid) as User;
   }
+
+  // No row for this UID yet. Before creating one, try to adopt an existing
+  // account that owns this verified email — prevents a second Firebase identity
+  // (e.g. email/password vs Google) from orphaning the user's role/admin.
+  const adopted = adoptAccountByVerifiedEmail({
+    firebase_uid: firebaseUser.uid,
+    email: firebaseUser.email,
+    email_verified: firebaseUser.email_verified,
+    display_name: firebaseUser.name,
+    avatar_url: firebaseUser.picture,
+  });
+  if (adopted) return adopted;
 
   const id = `usr_${randomUUID()}`;
   db.prepare(`

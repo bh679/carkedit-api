@@ -31,9 +31,11 @@ export function getDb(): Database.Database {
   return db;
 }
 
-export function initDatabase(): void {
-  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-  db = new Database(DB_PATH);
+export function initDatabase(dbPath: string = DB_PATH): void {
+  // Tests pass ':memory:' for an isolated, disposable DB; production uses the
+  // default on-disk path. Skip the mkdir for the in-memory sentinel.
+  if (dbPath !== ':memory:') fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
 
