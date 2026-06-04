@@ -7,7 +7,7 @@ import { hasRole, type Role } from '../auth/roles.js';
 declare global {
   namespace Express {
     interface Request {
-      firebaseUser?: { uid: string; email?: string; name?: string; picture?: string };
+      firebaseUser?: { uid: string; email?: string; name?: string; picture?: string; email_verified?: boolean };
       localUser?: User;
     }
   }
@@ -42,6 +42,7 @@ export function optionalAuth() {
         email: decoded.email,
         name: decoded.name,
         picture: decoded.picture,
+        email_verified: decoded.email_verified,
       };
       req.localUser = upsertUserFromFirebase(req.firebaseUser);
     } catch (err: any) {
@@ -74,6 +75,7 @@ export function requireAuth() {
         email: decoded.email,
         name: decoded.name,
         picture: decoded.picture,
+        email_verified: decoded.email_verified,
       };
       req.localUser = upsertUserFromFirebase(req.firebaseUser);
       next();
@@ -107,6 +109,7 @@ export function requireRole(min: Role) {
         email: decoded.email,
         name: decoded.name,
         picture: decoded.picture,
+        email_verified: decoded.email_verified,
       };
       req.localUser = upsertUserFromFirebase(req.firebaseUser);
       if (!hasRole(req.localUser, min)) {
