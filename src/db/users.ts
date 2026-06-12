@@ -43,7 +43,7 @@ export function createUser(data: {
     if (existing) {
       db.prepare(`
         UPDATE users SET
-          display_name = COALESCE(?, display_name),
+          display_name = COALESCE(NULLIF(?, ''), display_name),
           email = COALESCE(?, email),
           avatar_url = COALESCE(?, avatar_url),
           birth_month = ?,
@@ -163,7 +163,7 @@ export function upsertUserFromFirebase(firebaseUser: {
   db.prepare(`
     INSERT INTO users (id, firebase_uid, display_name, email, avatar_url, birth_month, birth_day, role)
     VALUES (?, ?, ?, ?, ?, 0, 0, 'Host')
-  `).run(id, firebaseUser.uid, firebaseUser.name || 'User', firebaseUser.email ?? null, firebaseUser.picture ?? null);
+  `).run(id, firebaseUser.uid, firebaseUser.name || '', firebaseUser.email ?? null, firebaseUser.picture ?? null);
 
   const created = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User;
   notifyAccountCreated(created, 'firebase');
