@@ -761,10 +761,11 @@ const server = defineServer({
         const { display_name, avatar_url, birth_month, birth_day } = req.body;
         const firebase_uid = req.firebaseUser!.uid;
         const email = req.body.email || req.firebaseUser!.email;
-        if (!display_name || typeof display_name !== 'string' || display_name.trim().length === 0) {
-          return res.status(400).json({ error: "display_name is required" });
-        }
-        const user = createUser({ display_name: display_name.trim(), firebase_uid, email, avatar_url, birth_month, birth_day });
+        // display_name is optional — a new account may be nameless until the
+        // player provides a name when creating a room. An empty value never
+        // overwrites an existing name (createUser uses NULLIF).
+        const name = typeof display_name === 'string' ? display_name.trim() : '';
+        const user = createUser({ display_name: name, firebase_uid, email, avatar_url, birth_month, birth_day });
         res.status(201).json(user);
       } catch (err) {
         console.error("[CarkedIt API] Create user error:", err);

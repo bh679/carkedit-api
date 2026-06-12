@@ -1,5 +1,5 @@
 import { initDatabase } from './database.js';
-import { upsertUserFromFirebase, setUserRole, listUsers, getUserById } from './users.js';
+import { upsertUserFromFirebase, createUser, setUserRole, listUsers, getUserById } from './users.js';
 
 // Each test runs against a fresh in-memory DB (full schema + migrations), so
 // the `users` table has the `role` column and is isolated per test.
@@ -85,5 +85,31 @@ describe('upsertUserFromFirebase — verified-email account reconciliation', () 
     expect(second.id).toBe(orig.id);
     expect(second.role).toBe('Admin');
     expect(listUsers()).toHaveLength(1);
+  });
+
+  it('creates a nameless account (blank display_name, not "User") when the token has no name', () => {
+    const u = upsertUserFromFirebase({ uid: 'uid_noname', email: 'noname@example.com', email_verified: true });
+    expect(u.display_name).toBe('');
+    expect(u.firebase_uid).toBe('uid_noname');
+  });
+});
+
+describe('createUser — empty display_name never overwrites an existing name', () => {
+  beforeEach(() => {
+    initDatabase(':memory:');
+  });
+
+  it('keeps the existing name when upserting the same UID with an empty display_name', () => {
+    const first = createUser({ display_name: 'Brennan', firebase_uid: 'uid_keep' });
+    const again = createUser({ display_name: '', firebase_uid: 'uid_keep' });
+    expect(again.id).toBe(first.id);
+    expect(again.display_name).toBe('Brennan'); // NULLIF('','') → COALESCE keeps existing
+    expect(listUsers()).toHaveLength(1);
+  });
+
+  it('still updates to a new non-empty name', () => {
+    createUser({ display_name: 'Old', firebase_uid: 'uid_upd' });
+    const updated = createUser({ display_name: 'New', firebase_uid: 'uid_upd' });
+    expect(updated.display_name).toBe('New');
   });
 });
