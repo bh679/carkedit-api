@@ -10,6 +10,7 @@ import { handleRevealDie, handleEndDieTurn } from "../phases/DiePhase.js";
 import { handleSubmitCard, handleSwapCard, handleRevealComplete, handleRevealSubmission, handleEndConvinceTurn, handleSelectWinner, handleNextRound } from "../phases/LivingPhase.js";
 import { handleStartEulogyRound, handleSelectEulogist, handleConfirmEulogists, handleDoneEulogy, handlePickBestEulogy, handleNextWildcard, handleRevealWinner } from "../phases/EulogyPhase.js";
 import { ROOM_CODE_WORDS } from "./roomWords.js";
+import { verifyHostAuthorization } from "./hostAuth.js";
 import { saveGameResult, saveCardPlays, saveCardDraws, saveGameEvent, backfillGameId, createLiveGame, updateLiveGame, completeLiveGame, abandonGame } from "../db/database.js";
 import type { GameResult, CardPlay, CardDraw, GameEvent } from "../db/types.js";
 import { postWebhookEmbed, buildGameStartEmbed, buildGameFinishEmbed } from "../services/discord/webhook.js";
@@ -33,8 +34,15 @@ export class GameRoom extends Room<{ state: GameState }> {
   private _cardPlays: CardPlay[] = [];
   private _previousPhase: string = "lobby";
   private _gameId: string | null = null;
+  private _hostUserId: string | null = null;
 
   async onCreate(options: any) {
+    // Hosting requires a signed-up account (joining does not). Runs before
+    // any state/DB setup so a rejected create persists nothing; throwing
+    // here rejects the client's create() call with the error message.
+    const hostUser = await verifyHostAuthorization(options.authToken);
+    this._hostUserId = hostUser?.id ?? null;
+
     this.setState(new GameState());
     // Default to the base CarkedIt deck enabled (sentinel pack id "base")
     this.state.selectedPackIds.push("base");
@@ -100,6 +108,7 @@ export class GameRoom extends Room<{ state: GameState }> {
       isPrivate: this.state.isPrivate,
       roomCode: this.state.roomCode || null,
       devMode: this.state.devMode,
+      hostAuthBypassed: hostUser === null,
     });
 
     this.onMessage("ready", (client) => {
@@ -323,10 +332,13 @@ export class GameRoom extends Room<{ state: GameState }> {
     player.birthMonth = (month >= 1 && month <= 12) ? month : 0;
     player.birthDay = (day >= 1 && day <= 31) ? day : 0;
     player.isDevName = !!options.isDevName;
-    player.userId = options.userId || "";
-    this.state.players.set(client.sessionId, player);
 
     const isHost = !this.state.hostId;
+    // The host's identity comes from the token verified in onCreate — never
+    // from client-supplied options. Joiners keep the existing trust model.
+    player.userId = (isHost && this._hostUserId) ? this._hostUserId : (options.userId || "");
+    this.state.players.set(client.sessionId, player);
+
     // First player to join becomes the host
     if (!this.state.hostId) {
       this.state.hostId = client.sessionId;
