@@ -1,5 +1,6 @@
 import { initDatabase } from './database.js';
 import { upsertUserFromFirebase, createUser, setUserRole, listUsers, getUserById } from './users.js';
+import { isAdminEmail, parseAdminEmails } from '../auth/admin-emails.js';
 
 // Each test runs against a fresh in-memory DB (full schema + migrations), so
 // the `users` table has the `role` column and is isolated per test.
@@ -111,5 +112,105 @@ describe('createUser — empty display_name never overwrites an existing name', 
     createUser({ display_name: 'Old', firebase_uid: 'uid_upd' });
     const updated = createUser({ display_name: 'New', firebase_uid: 'uid_upd' });
     expect(updated.display_name).toBe('New');
+  });
+});
+
+describe('admin-emails — parseAdminEmails / isAdminEmail', () => {
+  const ORIGINAL = process.env.ADMIN_EMAILS;
+  afterEach(() => {
+    if (ORIGINAL === undefined) delete process.env.ADMIN_EMAILS;
+    else process.env.ADMIN_EMAILS = ORIGINAL;
+  });
+
+  it('parses comma / whitespace / newline separated lists, trimmed + lowercased', () => {
+    const set = parseAdminEmails('  Owner@Example.com, ops@example.com\n a@b.co ');
+    expect(set).toEqual(new Set(['owner@example.com', 'ops@example.com', 'a@b.co']));
+  });
+
+  it('is empty when unset or blank', () => {
+    expect(parseAdminEmails(undefined).size).toBe(0);
+    expect(parseAdminEmails('').size).toBe(0);
+    expect(parseAdminEmails('   ').size).toBe(0);
+  });
+
+  it('matches case-insensitively and exactly — no plus-address collapsing', () => {
+    process.env.ADMIN_EMAILS = 'owner@example.com';
+    expect(isAdminEmail('OWNER@Example.com')).toBe(true);
+    expect(isAdminEmail('owner@example.com')).toBe(true);
+    expect(isAdminEmail('owner+test@example.com')).toBe(false); // distinct identity
+    expect(isAdminEmail('someone@example.com')).toBe(false);
+    expect(isAdminEmail(null)).toBe(false);
+    expect(isAdminEmail(undefined)).toBe(false);
+  });
+
+  it('returns false for everyone when the allowlist is unset', () => {
+    delete process.env.ADMIN_EMAILS;
+    expect(isAdminEmail('owner@example.com')).toBe(false);
+  });
+});
+
+describe('upsertUserFromFirebase — ADMIN_EMAILS allowlist auto-grant', () => {
+  const ORIGINAL = process.env.ADMIN_EMAILS;
+  beforeEach(() => {
+    process.env.ADMIN_EMAILS = 'owner@example.com';
+    initDatabase(':memory:');
+  });
+  afterEach(() => {
+    if (ORIGINAL === undefined) delete process.env.ADMIN_EMAILS;
+    else process.env.ADMIN_EMAILS = ORIGINAL;
+  });
+
+  it('grants Admin to a verified allowlisted email on first sign-in (fresh DB)', () => {
+    const u = upsertUserFromFirebase({ uid: 'uid_owner', email: 'owner@example.com', name: 'Owner', email_verified: true });
+    expect(u.role).toBe('Admin');
+    expect(u.is_admin).toBe(1);
+    expect(listUsers()).toHaveLength(1);
+  });
+
+  it('does NOT grant Admin when the allowlisted email is unverified (no self-promote)', () => {
+    const u = upsertUserFromFirebase({ uid: 'uid_owner', email: 'owner@example.com', name: 'Owner', email_verified: false });
+    expect(u.role).toBe('Host');
+    expect(u.is_admin).toBe(0);
+  });
+
+  it('treats missing email_verified as unverified (no grant)', () => {
+    const u = upsertUserFromFirebase({ uid: 'uid_owner', email: 'owner@example.com', name: 'Owner' });
+    expect(u.role).toBe('Host');
+  });
+
+  it('leaves a verified non-allowlisted user as Host', () => {
+    const u = upsertUserFromFirebase({ uid: 'uid_other', email: 'someone@example.com', name: 'Someone', email_verified: true });
+    expect(u.role).toBe('Host');
+    expect(u.is_admin).toBe(0);
+  });
+
+  it('self-heals: promotes an existing Host row for an allowlisted owner on next verified sign-in', () => {
+    process.env.ADMIN_EMAILS = ''; // signed in before the operator configured the allowlist
+    const first = upsertUserFromFirebase({ uid: 'uid_owner', email: 'owner@example.com', name: 'Owner', email_verified: true });
+    expect(first.role).toBe('Host');
+    process.env.ADMIN_EMAILS = 'owner@example.com'; // operator adds env var; owner signs in again
+    const again = upsertUserFromFirebase({ uid: 'uid_owner', email: 'owner@example.com', name: 'Owner', email_verified: true });
+    expect(again.id).toBe(first.id);
+    expect(again.role).toBe('Admin');
+    expect(listUsers()).toHaveLength(1);
+  });
+
+  it('never demotes a non-allowlisted Admin (additive only)', () => {
+    const admin = upsertUserFromFirebase({ uid: 'uid_manual', email: 'manual@example.com', name: 'Manual', email_verified: true });
+    setUserRole(admin.id, 'Admin'); // promoted out-of-band, e.g. via the admin panel
+    const again = upsertUserFromFirebase({ uid: 'uid_manual', email: 'manual@example.com', name: 'Manual', email_verified: true });
+    expect(again.role).toBe('Admin');
+  });
+
+  it('composes with adoption: a verified allowlisted login reclaims a same-email row and gets Admin', () => {
+    // A pre-existing Host row owns the email under a different UID (unverified path).
+    const host = upsertUserFromFirebase({ uid: 'uid_old', email: 'owner@example.com', name: 'Owner', email_verified: false });
+    expect(host.role).toBe('Host');
+    // Owner signs in with verified Google (new UID): adopt re-binds the row, allowlist grants Admin.
+    const google = upsertUserFromFirebase({ uid: 'uid_google', email: 'owner@example.com', name: 'Owner', email_verified: true });
+    expect(google.id).toBe(host.id);             // adopted, not duplicated
+    expect(google.firebase_uid).toBe('uid_google');
+    expect(google.role).toBe('Admin');
+    expect(listUsers()).toHaveLength(1);
   });
 });
