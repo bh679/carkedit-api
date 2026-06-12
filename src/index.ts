@@ -46,6 +46,16 @@ try {
     initializeApp({ credential: cert(serviceAccount) });
     setFirebaseAvailable(true);
     console.log(`[CarkedIt API] Firebase Admin initialized (project: ${firebaseProjectId})`);
+  } else if (process.env.FIREBASE_PROJECT_ID) {
+    // Credential-less init for local dev: ID-token verification (the only
+    // admin API this server uses) checks signatures against Google's public
+    // certs, so it needs the project id but no service-account key. Lets a
+    // local API verify tokens from the carkeditdev client without secrets.
+    const { initializeApp } = await import("firebase-admin/app");
+    firebaseProjectId = process.env.FIREBASE_PROJECT_ID;
+    initializeApp({ projectId: firebaseProjectId });
+    setFirebaseAvailable(true);
+    console.log(`[CarkedIt API] Firebase Admin initialized credential-less (project: ${firebaseProjectId}) — ID-token verification only`);
   } else {
     console.warn("[CarkedIt API] Firebase service account not found — auth features disabled");
   }
