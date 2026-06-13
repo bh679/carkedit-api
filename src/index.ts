@@ -487,6 +487,21 @@ const server = defineServer({
       }
     });
 
+    // Account-scoped "My Games" — only games hosted by the signed-in user.
+    // Must be registered BEFORE "/games/:id" so "mine" is not captured as an :id param.
+    app.get("/api/carkedit/games/mine", requireAuth(), (req: any, res: any) => {
+      try {
+        const result = getRecentGames({
+          ...buildGameFiltersFromQuery(req.query),
+          hostUserId: req.localUser.id,
+        });
+        res.json(result);
+      } catch (err) {
+        console.error("[CarkedIt API] Get my games error:", err);
+        res.status(500).json({ error: "Failed to retrieve games" });
+      }
+    });
+
     app.get("/api/carkedit/games/:id", requireQA(), (req: any, res: any) => {
       try {
         const game = getGameById(req.params.id);
