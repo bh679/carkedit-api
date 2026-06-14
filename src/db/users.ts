@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { getDb } from './database.js';
 import type { User } from './types.js';
 import type { Role } from '../auth/roles.js';
+import { isAdminEmail } from '../auth/admin-emails.js';
 import { postWebhookEmbed, buildAccountCreatedEmbed } from '../services/discord/webhook.js';
 
 const __pkgDir = path.dirname(fileURLToPath(import.meta.url));
@@ -43,7 +44,7 @@ export function createUser(data: {
     if (existing) {
       db.prepare(`
         UPDATE users SET
-          display_name = COALESCE(?, display_name),
+          display_name = COALESCE(NULLIF(?, ''), display_name),
           email = COALESCE(?, email),
           avatar_url = COALESCE(?, avatar_url),
           birth_month = ?,
@@ -125,6 +126,22 @@ function adoptAccountByVerifiedEmail(params: {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(canonical.id) as User;
 }
 
+/**
+ * Ensure an allowlisted owner holds Admin.
+ *
+ * If the signed-in identity's email is VERIFIED and present in `ADMIN_EMAILS`,
+ * promote the resolved row to Admin. Idempotent (skips when already Admin) and
+ * gated on `email_verified` exactly like adoptAccountByVerifiedEmail, so an
+ * UNVERIFIED email/password signup using an allowlisted address can never
+ * self-promote. Additive only — never demotes, never touches other users.
+ */
+function applyAdminAllowlist(user: User, emailVerified?: boolean): User {
+  if (emailVerified !== true) return user;
+  if (user.role === 'Admin') return user;
+  if (!isAdminEmail(user.email)) return user;
+  return setUserRole(user.id, 'Admin') ?? user;
+}
+
 export function upsertUserFromFirebase(firebaseUser: {
   uid: string;
   email?: string;
@@ -144,7 +161,7 @@ export function upsertUserFromFirebase(firebaseUser: {
         updated_at = datetime('now')
       WHERE firebase_uid = ?
     `).run(firebaseUser.name ?? null, firebaseUser.email ?? null, firebaseUser.picture ?? null, firebaseUser.uid);
-    return db.prepare('SELECT * FROM users WHERE firebase_uid = ?').get(firebaseUser.uid) as User;
+    return applyAdminAllowlist(db.prepare('SELECT * FROM users WHERE firebase_uid = ?').get(firebaseUser.uid) as User, firebaseUser.email_verified);
   }
 
   // No row for this UID yet. Before creating one, try to adopt an existing
@@ -157,17 +174,17 @@ export function upsertUserFromFirebase(firebaseUser: {
     display_name: firebaseUser.name,
     avatar_url: firebaseUser.picture,
   });
-  if (adopted) return adopted;
+  if (adopted) return applyAdminAllowlist(adopted, firebaseUser.email_verified);
 
   const id = `usr_${randomUUID()}`;
   db.prepare(`
     INSERT INTO users (id, firebase_uid, display_name, email, avatar_url, birth_month, birth_day, role)
     VALUES (?, ?, ?, ?, ?, 0, 0, 'Host')
-  `).run(id, firebaseUser.uid, firebaseUser.name || 'User', firebaseUser.email ?? null, firebaseUser.picture ?? null);
+  `).run(id, firebaseUser.uid, firebaseUser.name || '', firebaseUser.email ?? null, firebaseUser.picture ?? null);
 
   const created = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User;
   notifyAccountCreated(created, 'firebase');
-  return created;
+  return applyAdminAllowlist(created, firebaseUser.email_verified);
 }
 
 export function updateUserProfile(id: string, data: {

@@ -46,6 +46,16 @@ try {
     initializeApp({ credential: cert(serviceAccount) });
     setFirebaseAvailable(true);
     console.log(`[CarkedIt API] Firebase Admin initialized (project: ${firebaseProjectId})`);
+  } else if (process.env.FIREBASE_PROJECT_ID) {
+    // Credential-less init for local dev: ID-token verification (the only
+    // admin API this server uses) checks signatures against Google's public
+    // certs, so it needs the project id but no service-account key. Lets a
+    // local API verify tokens from the carkeditdev client without secrets.
+    const { initializeApp } = await import("firebase-admin/app");
+    firebaseProjectId = process.env.FIREBASE_PROJECT_ID;
+    initializeApp({ projectId: firebaseProjectId });
+    setFirebaseAvailable(true);
+    console.log(`[CarkedIt API] Firebase Admin initialized credential-less (project: ${firebaseProjectId}) — ID-token verification only`);
   } else {
     console.warn("[CarkedIt API] Firebase service account not found — auth features disabled");
   }
@@ -477,6 +487,21 @@ const server = defineServer({
       }
     });
 
+    // Account-scoped "My Games" — only games hosted by the signed-in user.
+    // Must be registered BEFORE "/games/:id" so "mine" is not captured as an :id param.
+    app.get("/api/carkedit/games/mine", requireAuth(), (req: any, res: any) => {
+      try {
+        const result = getRecentGames({
+          ...buildGameFiltersFromQuery(req.query),
+          hostUserId: req.localUser.id,
+        });
+        res.json(result);
+      } catch (err) {
+        console.error("[CarkedIt API] Get my games error:", err);
+        res.status(500).json({ error: "Failed to retrieve games" });
+      }
+    });
+
     app.get("/api/carkedit/games/:id", requireQA(), (req: any, res: any) => {
       try {
         const game = getGameById(req.params.id);
@@ -751,10 +776,11 @@ const server = defineServer({
         const { display_name, avatar_url, birth_month, birth_day } = req.body;
         const firebase_uid = req.firebaseUser!.uid;
         const email = req.body.email || req.firebaseUser!.email;
-        if (!display_name || typeof display_name !== 'string' || display_name.trim().length === 0) {
-          return res.status(400).json({ error: "display_name is required" });
-        }
-        const user = createUser({ display_name: display_name.trim(), firebase_uid, email, avatar_url, birth_month, birth_day });
+        // display_name is optional — a new account may be nameless until the
+        // player provides a name when creating a room. An empty value never
+        // overwrites an existing name (createUser uses NULLIF).
+        const name = typeof display_name === 'string' ? display_name.trim() : '';
+        const user = createUser({ display_name: name, firebase_uid, email, avatar_url, birth_month, birth_day });
         res.status(201).json(user);
       } catch (err) {
         console.error("[CarkedIt API] Create user error:", err);

@@ -32,7 +32,7 @@ export class GameState extends Schema {
   @type(["string"]) turnOrder = new ArraySchema<string>();
 
   // Game settings (synced to all clients, host-editable during lobby)
-  @type("number") rounds: number = 2;
+  @type("number") rounds: number = 1;
   @type("number") handSize: number = 5;
   @type("boolean") enableDie: boolean = true;
   @type("boolean") enableLive: boolean = true;
