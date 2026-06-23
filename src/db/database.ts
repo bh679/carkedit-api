@@ -600,11 +600,12 @@ export interface GameFilters {
   hidePlayerCounts?: string[];
   playerName?: string;
   hostUserId?: string;
+  brandId?: string;
   orderBy?: GameOrderBy;
   orderDir?: GameOrderDir;
 }
 
-type FilterDim = 'date' | 'errors' | 'dev' | 'status' | 'groups' | 'raw' | 'duration' | 'players' | 'playerName' | 'hostUser';
+type FilterDim = 'date' | 'errors' | 'dev' | 'status' | 'groups' | 'raw' | 'duration' | 'players' | 'playerName' | 'hostUser' | 'brand';
 
 function durationBucketCondition(key: string): { sql: string; params: any[] } | null {
   if (key === 'unknown') return { sql: 'g.duration_seconds IS NULL', params: [] };
@@ -675,6 +676,14 @@ function buildConditions(filters: GameFilters, exclude: Set<FilterDim> = new Set
   if (!exclude.has('hostUser') && filters.hostUserId) {
     conditions.push('g.host_user_id = ?');
     params.push(filters.hostUserId);
+  }
+  // Brand-scoped: a game's brand is DERIVED from its server-verified host
+  // (games.host_user_id → users.brand_id), never a games column — so this is
+  // non-spoofable. Never added to any `exclude` set, so brand scope holds across
+  // every filter-count breakdown.
+  if (!exclude.has('brand') && filters.brandId) {
+    conditions.push('g.host_user_id IN (SELECT id FROM users WHERE brand_id = ?)');
+    params.push(filters.brandId);
   }
 
   const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';

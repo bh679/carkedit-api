@@ -12,14 +12,14 @@ import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
 import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameFilterCounts, getGameById, getStats, getStatsByPeriod, getGamesStats, getGameStateDurations, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev, saveMailingListEntry, getUserGameStats } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag, setUserRole } from "./db/users.js";
-import { createBrand, getBrandBySlug, getApprovedBrandBySlug, listBrands, setBrandStatus } from "./db/brands.js";
+import { createBrand, getBrandBySlug, getApprovedBrandBySlug, listBrands, listBrandsByOwner, listBrandUsers, setBrandStatus } from "./db/brands.js";
 import { validateBrandSlug, buildReservedSlugs } from "./config/brand-config.js";
 import type { BrandStatus } from "./db/types.js";
 import { listPagePermissions, setPagePermission } from "./db/page-permissions.js";
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, setPackBaseCost, getPackStats, listPackStatsAll } from "./db/packs.js";
 import { createGenerationLog, listGenerationLog, mergeLogEntries } from "./db/generation-log.js";
 import { createCostEntry, getCostByEnvironment } from "./db/cost-entries.js";
-import { optionalAuth, requireAuth, requireAdmin, requireQA, setFirebaseAvailable, isFirebaseAvailable } from "./middleware/auth.js";
+import { optionalAuth, requireAuth, requireAdmin, requireQA, requireBrandOwner, setFirebaseAvailable, isFirebaseAvailable } from "./middleware/auth.js";
 import { isRole } from "./auth/roles.js";
 import { publicWriteLimiter, publicBodyLimit } from "./middleware/rate-limit.js";
 import { attachRequestId, requestLogger } from "./middleware/request-logger.js";
@@ -490,6 +490,7 @@ const server = defineServer({
       hideDurationBuckets: parseCsv(q.hideDurationBuckets),
       hidePlayerCounts: parseCsv(q.hidePlayerCounts),
       playerName: (typeof q.playerName === 'string' && q.playerName.trim().length > 0) ? q.playerName : undefined,
+      brandId: (typeof q.brandId === 'string' && q.brandId) ? q.brandId : undefined,
       orderBy: (['recency', 'duration'].includes(q.orderBy) ? q.orderBy : 'recency') as any,
       orderDir: (['asc', 'desc'].includes(q.orderDir) ? q.orderDir : 'desc') as any,
     });
@@ -863,6 +864,43 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Get brand by slug error:", err);
         res.status(500).json({ error: "Failed to retrieve brand" });
+      }
+    });
+
+    // Owner: brands owned by the signed-in user — lets the brand-admin page
+    // discover its brand id without knowing it up front. Registered BEFORE the
+    // "/brands/:id/..." routes so "mine" is never captured as an :id.
+    app.get("/api/carkedit/brands/mine", requireAuth(), (req: any, res: any) => {
+      try {
+        res.json({ brands: listBrandsByOwner(req.localUser!.id) });
+      } catch (err) {
+        console.error("[CarkedIt API] List my brands error:", err);
+        res.status(500).json({ error: "Failed to list brands" });
+      }
+    });
+
+    // Owner-gated: brand-scoped game stats. Brand is DERIVED from the
+    // server-verified host (games.host_user_id → users.brand_id), so the numbers
+    // are non-spoofable. Reuses getGamesStats/getRecentGames — no new aggregation.
+    app.get("/api/carkedit/brands/:id/stats", requireBrandOwner(), (req: any, res: any) => {
+      try {
+        res.json({
+          stats: getGamesStats({ brandId: req.params.id }),
+          recentGames: getRecentGames({ brandId: req.params.id, limit: 10 }).games,
+        });
+      } catch (err) {
+        console.error("[CarkedIt API] Brand stats error:", err);
+        res.status(500).json({ error: "Failed to retrieve brand stats" });
+      }
+    });
+
+    // Owner-gated: accounts attribution-tagged to this brand (PII-limited).
+    app.get("/api/carkedit/brands/:id/users", requireBrandOwner(), (req: any, res: any) => {
+      try {
+        res.json({ users: listBrandUsers(req.params.id) });
+      } catch (err) {
+        console.error("[CarkedIt API] Brand users error:", err);
+        res.status(500).json({ error: "Failed to retrieve brand users" });
       }
     });
 

@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { upsertUserFromFirebase } from '../db/users.js';
-import type { User } from '../db/types.js';
+import { getBrandById } from '../db/brands.js';
+import type { User, Brand } from '../db/types.js';
 import { hasRole, type Role } from '../auth/roles.js';
 
 // Extend Express Request
@@ -147,4 +148,37 @@ export function requireQA() {
 /** Host-tier access (includes QA + Admin). */
 export function requireHost() {
   return requireRole('Host');
+}
+
+/**
+ * Pure access decision for an owner-gated brand panel. A global admin (legacy
+ * `is_admin` column OR the current `role`-based 'Admin' tier) may inspect any
+ * brand; otherwise only the brand's `owner_user_id` passes. Returns 'not_found'
+ * when the brand id resolves to nothing (so the caller can 404 instead of 403).
+ * Kept pure (no req/res) so the allow/deny logic is unit-testable without Firebase.
+ */
+export function brandAccessDecision(
+  user: User | undefined,
+  brand: Brand | null,
+): 'ok' | 'not_found' | 'forbidden' {
+  if (!brand) return 'not_found';
+  if (!user) return 'forbidden';
+  if (user.is_admin || hasRole(user, 'Admin') || brand.owner_user_id === user.id) return 'ok';
+  return 'forbidden';
+}
+
+/**
+ * Owner-gated brand access — wraps requireAuth() (which sends its own 503 when
+ * Firebase is unavailable / 401 on a bad token and only invokes our callback on
+ * success), then loads the brand via `:id` and applies brandAccessDecision.
+ */
+export function requireBrandOwner() {
+  const auth = requireAuth();
+  return (req: Request, res: Response, next: NextFunction) =>
+    auth(req, res, () => {
+      const decision = brandAccessDecision(req.localUser, getBrandById(String(req.params.id)));
+      if (decision === 'not_found') return res.status(404).json({ error: 'Brand not found' });
+      if (decision === 'forbidden') return res.status(403).json({ error: 'Brand owner access required' });
+      next();
+    });
 }
