@@ -12,6 +12,9 @@ import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
 import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameFilterCounts, getGameById, getStats, getStatsByPeriod, getGamesStats, getGameStateDurations, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev, saveMailingListEntry, getUserGameStats } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag, setUserRole } from "./db/users.js";
+import { createBrand, getBrandBySlug, getApprovedBrandBySlug, listBrands, setBrandStatus } from "./db/brands.js";
+import { validateBrandSlug, buildReservedSlugs } from "./config/brand-config.js";
+import type { BrandStatus } from "./db/types.js";
 import { listPagePermissions, setPagePermission } from "./db/page-permissions.js";
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, setPackBaseCost, getPackStats, listPackStatsAll } from "./db/packs.js";
 import { createGenerationLog, listGenerationLog, mergeLogEntries } from "./db/generation-log.js";
@@ -208,6 +211,30 @@ const server = defineServer({
         cb(null, true);
       },
     });
+
+    // Partner-brand ("Evangelist") logo upload. Separate from `brandUpload`
+    // (whose filename keys off req.params.id, the pack id); brand creation has
+    // no :id yet, so the filename is timestamp + short-uuid. Same dir + limits.
+    const brandLogoUpload = multer({
+      storage: multer.diskStorage({
+        destination: brandsDir,
+        filename: (_req, file, cb) => {
+          const ext = path.extname(file.originalname || '').toLowerCase() || '.png';
+          cb(null, `brand-${Date.now()}-${randomUUID().slice(0, 8)}${ext}`);
+        },
+      }),
+      limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
+      fileFilter: (_req, file, cb) => {
+        if (!ALLOWED_BRAND_MIME.has(file.mimetype)) {
+          return cb(new Error('Only PNG, WebP, or SVG images are allowed'));
+        }
+        cb(null, true);
+      },
+    });
+
+    // Reserved-slug set for partner vanity URLs — static reserved words unioned
+    // with the live client dir's *.html basenames. Built once at boot.
+    const reservedSlugs = buildReservedSlugs(clientDir);
 
     // Apply optional auth to pack, user, and image-gen routes
     app.use('/api/carkedit/packs', optionalAuth());
@@ -815,6 +842,92 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Update user error:", err);
         res.status(500).json({ error: "Failed to update user" });
+      }
+    });
+
+    // ── Partner brands ("Evangelist") ─────────────────────────────────────
+    const BRAND_STATUSES: BrandStatus[] = ['pending', 'approved', 'rejected', 'suspended'];
+
+    // Public: resolve an APPROVED slug → minimal brand payload. The slug
+    // resolver injects window.__BRAND__ inline on first paint; this endpoint is
+    // the client's fallback hydration path (e.g. a standalone Apache rewrite to
+    // /index.html that never went through the resolver).
+    app.get("/api/carkedit/brands/by-slug/:slug", (req: any, res: any) => {
+      try {
+        const slug = String(req.params.slug || '').toLowerCase();
+        const brand = getApprovedBrandBySlug(slug);
+        if (!brand) return res.status(404).json({ error: "Brand not found" });
+        res.json({ id: brand.id, slug: brand.slug, name: brand.name, logoUrl: brand.logo_url });
+      } catch (err) {
+        console.error("[CarkedIt API] Get brand by slug error:", err);
+        res.status(500).json({ error: "Failed to retrieve brand" });
+      }
+    });
+
+    // Admin: list all brands (optionally filtered by status) for the review UI.
+    app.get("/api/carkedit/brands", requireAdmin(), (req: any, res: any) => {
+      try {
+        const status = req.query.status as string | undefined;
+        if (status && !BRAND_STATUSES.includes(status as BrandStatus)) {
+          return res.status(400).json({ error: "Invalid status filter" });
+        }
+        res.json({ brands: listBrands(status as BrandStatus | undefined) });
+      } catch (err) {
+        console.error("[CarkedIt API] List brands error:", err);
+        res.status(500).json({ error: "Failed to list brands" });
+      }
+    });
+
+    // Request to become an Evangelist: any signed-up user submits a brand
+    // (name + slug + optional logo). Created status='pending' — an admin must
+    // approve it (PATCH below) before the slug resolves. Owner = requester.
+    app.post("/api/carkedit/brands", requireAuth(), brandLogoUpload.single('logo'), (req: any, res: any) => {
+      try {
+        const rawName = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+        if (!rawName || rawName.length > 80) {
+          if (req.file) fs.unlink(req.file.path, () => {});
+          return res.status(400).json({ error: "name is required (max 80 chars)" });
+        }
+        const slugCheck = validateBrandSlug(req.body?.slug ?? '', reservedSlugs);
+        if (!slugCheck.ok) {
+          if (req.file) fs.unlink(req.file.path, () => {});
+          return res.status(400).json({ error: slugCheck.error });
+        }
+        if (getBrandBySlug(slugCheck.slug)) {
+          if (req.file) fs.unlink(req.file.path, () => {});
+          return res.status(409).json({ error: "That URL is already taken" });
+        }
+        const logo_url = req.file ? `/uploads/brands/${req.file.filename}` : null;
+        const brand = createBrand({
+          slug: slugCheck.slug,
+          name: rawName,
+          owner_user_id: req.localUser!.id,
+          logo_url,
+          status: 'pending',
+        });
+        res.status(201).json(brand);
+      } catch (err) {
+        console.error("[CarkedIt API] Create brand error:", err);
+        res.status(500).json({ error: "Failed to create brand" });
+      }
+    }, (err: any, _req: any, res: any, _next: any) => {
+      // Multer error handler (size limit / fileFilter reject).
+      res.status(400).json({ error: err?.message || "Invalid upload" });
+    });
+
+    // Admin: approve / reject / suspend a brand request.
+    app.patch("/api/carkedit/brands/:id", requireAdmin(), (req: any, res: any) => {
+      try {
+        const status = req.body?.status as string;
+        if (!BRAND_STATUSES.includes(status as BrandStatus)) {
+          return res.status(400).json({ error: `status must be one of ${BRAND_STATUSES.join(', ')}` });
+        }
+        const brand = setBrandStatus(req.params.id, status as BrandStatus);
+        if (!brand) return res.status(404).json({ error: "Brand not found" });
+        res.json(brand);
+      } catch (err) {
+        console.error("[CarkedIt API] Update brand status error:", err);
+        res.status(500).json({ error: "Failed to update brand" });
       }
     });
 
@@ -2080,6 +2193,46 @@ const server = defineServer({
         }
       }
     );
+
+    // ── Partner-brand vanity URL resolver (MUST be mounted LAST) ──────────
+    // Every real static file (express.static above) and every /api route has
+    // already had its chance to respond, so a brand slug can NEVER shadow a
+    // real page/asset/endpoint. Only an otherwise-unmatched single-segment GET
+    // reaches here. For an APPROVED slug we serve index.html with an injected
+    // window.__BRAND__ so the client boots co-branded with no extra round-trip;
+    // anything else falls through to Express's default 404.
+    const indexHtmlPath = path.join(clientDir, 'index.html');
+    app.get(/^\/([A-Za-z0-9-]+)\/?$/, (req: any, res: any, next: any) => {
+      const slug = String(req.params[0] || '').toLowerCase();
+      if (!slug || reservedSlugs.has(slug)) return next();
+
+      let brand;
+      try {
+        brand = getApprovedBrandBySlug(slug);
+      } catch (err) {
+        console.error("[CarkedIt API] Brand slug lookup error:", err);
+        return next();
+      }
+      if (!brand) return next();
+
+      let html: string;
+      try {
+        html = fs.readFileSync(indexHtmlPath, 'utf-8');
+      } catch (err) {
+        console.error("[CarkedIt API] index.html read error:", err);
+        return next();
+      }
+
+      const payload = JSON.stringify({
+        id: brand.id, slug: brand.slug, name: brand.name, logoUrl: brand.logo_url,
+      }).replace(/</g, '\\u003c'); // neutralize a "</script>" in any field
+      const inject = `<script>window.__BRAND__=${payload};</script>`;
+      const out = html.includes('<head>') ? html.replace('<head>', `<head>${inject}`) : inject + html;
+
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.send(out);
+    });
   },
 });
 
