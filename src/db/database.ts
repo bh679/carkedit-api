@@ -151,6 +151,26 @@ export function initDatabase(dbPath: string = DB_PATH): void {
     );
     CREATE INDEX IF NOT EXISTS idx_users_firebase_uid ON users(firebase_uid);
 
+    -- Partner brands ("Evangelist"): each owns a vanity URL (slug) under which
+    -- the game runs co-branded. Placed after the users table so the owner FK
+    -- target exists. Only status='approved' brands resolve their slug.
+    -- theme_json / custom_domain are reserved for future theming / domains.
+    CREATE TABLE IF NOT EXISTS brands (
+      id TEXT PRIMARY KEY,
+      slug TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      logo_url TEXT,
+      owner_user_id TEXT NOT NULL REFERENCES users(id),
+      status TEXT NOT NULL DEFAULT 'pending',
+      theme_json TEXT,
+      custom_domain TEXT UNIQUE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_brands_slug ON brands(slug);
+    CREATE INDEX IF NOT EXISTS idx_brands_owner ON brands(owner_user_id);
+    CREATE INDEX IF NOT EXISTS idx_brands_status ON brands(status);
+
     CREATE TABLE IF NOT EXISTS expansion_packs (
       id TEXT PRIMARY KEY,
       creator_id TEXT NOT NULL REFERENCES users(id),

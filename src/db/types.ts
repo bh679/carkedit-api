@@ -175,6 +175,28 @@ export interface User {
   updated_at: string;
 }
 
+/** Lifecycle of a partner brand. Only 'approved' brands resolve their slug. */
+export type BrandStatus = 'pending' | 'approved' | 'rejected' | 'suspended';
+
+/**
+ * A partner-brand ("Evangelist") tenant. Owns a vanity URL (slug) under which
+ * the game runs co-branded. `brand_id` on a user is the attribution tag; a
+ * game's brand is derived via games.host_user_id → users.brand_id (no column).
+ * `theme_json` / `custom_domain` are reserved for future use (nullable today).
+ */
+export interface Brand {
+  id: string;
+  slug: string;
+  name: string;
+  logo_url: string | null;
+  owner_user_id: string;
+  status: BrandStatus;
+  theme_json: string | null;
+  custom_domain: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ExpansionPack {
   id: string;
   creator_id: string;
