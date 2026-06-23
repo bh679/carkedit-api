@@ -171,6 +171,8 @@ export interface User {
   role: Role;
   birth_month: number;
   birth_day: number;
+  /** Partner brand the account signed up under (attribution tag; never gates access). */
+  brand_id: string | null;
   created_at: string;
   updated_at: string;
 }

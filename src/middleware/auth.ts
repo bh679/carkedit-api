@@ -24,6 +24,18 @@ export function isFirebaseAvailable(): boolean {
 }
 
 /**
+ * Partner-brand id carried in a signup request body, used ONLY to attribute a
+ * brand-new account at creation time (upsertUserFromFirebase applies it on its
+ * INSERT branch only; existing accounts are untouched). Returns undefined when
+ * absent — `express.json()` runs before these middlewares, so `req.body` is
+ * populated for JSON POSTs; multipart/GET requests simply yield undefined.
+ */
+function brandIdFromReq(req: Request): string | undefined {
+  const b = (req.body as any)?.brand_id;
+  return typeof b === 'string' && b ? b : undefined;
+}
+
+/**
  * Optional auth — attaches user if Bearer token present, does NOT reject without token.
  */
 export function optionalAuth() {
@@ -44,7 +56,7 @@ export function optionalAuth() {
         picture: decoded.picture,
         email_verified: decoded.email_verified,
       };
-      req.localUser = upsertUserFromFirebase(req.firebaseUser);
+      req.localUser = upsertUserFromFirebase(req.firebaseUser, brandIdFromReq(req));
     } catch (err: any) {
       console.warn('[CarkedIt Auth] Invalid token:', err.message);
     }
@@ -77,7 +89,7 @@ export function requireAuth() {
         picture: decoded.picture,
         email_verified: decoded.email_verified,
       };
-      req.localUser = upsertUserFromFirebase(req.firebaseUser);
+      req.localUser = upsertUserFromFirebase(req.firebaseUser, brandIdFromReq(req));
       next();
     } catch (err: any) {
       return res.status(401).json({ error: 'Invalid or expired token' });
@@ -111,7 +123,7 @@ export function requireRole(min: Role) {
         picture: decoded.picture,
         email_verified: decoded.email_verified,
       };
-      req.localUser = upsertUserFromFirebase(req.firebaseUser);
+      req.localUser = upsertUserFromFirebase(req.firebaseUser, brandIdFromReq(req));
       if (!hasRole(req.localUser, min)) {
         return res.status(403).json({ error: `${min} access required` });
       }

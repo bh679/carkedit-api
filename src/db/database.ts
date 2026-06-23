@@ -342,6 +342,12 @@ export function initDatabase(dbPath: string = DB_PATH): void {
     db.exec("UPDATE users SET role = 'Admin' WHERE is_admin = 1");
     db.exec('CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)');
   }
+  // Partner-brand attribution: which brand a user signed up under (nullable,
+  // written once at account creation, read by no auth/host/join path).
+  if (!userCols.includes('brand_id')) {
+    db.exec('ALTER TABLE users ADD COLUMN brand_id TEXT');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_users_brand_id ON users(brand_id)');
+  }
 
   // Migrate: add is_dev column to survey_responses (for existing DBs)
   const surveyCols = db.prepare("PRAGMA table_info(survey_responses)").all().map((c: any) => c.name);

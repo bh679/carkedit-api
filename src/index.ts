@@ -800,14 +800,16 @@ const server = defineServer({
 
     app.post("/api/carkedit/users", requireAuth(), (req: any, res: any) => {
       try {
-        const { display_name, avatar_url, birth_month, birth_day } = req.body;
+        const { display_name, avatar_url, birth_month, birth_day, brand_id } = req.body;
         const firebase_uid = req.firebaseUser!.uid;
         const email = req.body.email || req.firebaseUser!.email;
         // display_name is optional — a new account may be nameless until the
         // player provides a name when creating a room. An empty value never
-        // overwrites an existing name (createUser uses NULLIF).
+        // overwrites an existing name (createUser uses NULLIF). brand_id is the
+        // partner-brand attribution tag (validated + written only at creation;
+        // the auth middleware already applied it when this is a new account).
         const name = typeof display_name === 'string' ? display_name.trim() : '';
-        const user = createUser({ display_name: name, firebase_uid, email, avatar_url, birth_month, birth_day });
+        const user = createUser({ display_name: name, firebase_uid, email, avatar_url, birth_month, birth_day, brand_id });
         res.status(201).json(user);
       } catch (err) {
         console.error("[CarkedIt API] Create user error:", err);
