@@ -28,6 +28,7 @@ export interface GameResult {
   settings_json?: string;
   host_ip_hash?: string;
   host_user_id?: string;
+  brand_id?: string | null;
   players: GamePlayerResult[];
 }
 
