@@ -6,7 +6,8 @@
 // touches games.
 import { randomUUID } from 'node:crypto';
 import { getDb } from './database.js';
-import type { Brand, BrandStatus } from './types.js';
+import { validateBrandSlug } from '../config/brand-config.js';
+import type { Brand, BrandStatus, BrandWithOwner } from './types.js';
 
 export function createBrand(data: {
   slug: string;
@@ -52,6 +53,43 @@ export function listBrands(status?: BrandStatus): Brand[] {
 export function listBrandsByOwner(ownerUserId: string): Brand[] {
   const db = getDb();
   return db.prepare('SELECT * FROM brands WHERE owner_user_id = ? ORDER BY created_at DESC').all(ownerUserId) as Brand[];
+}
+
+/**
+ * Brands (optionally filtered by status) enriched with the owner's display name
+ * + email via a LEFT JOIN — so the admin review UI shows WHO requested a brand,
+ * not just an opaque owner id. Owner columns are null if the user row is gone.
+ */
+export function listBrandsWithOwner(status?: BrandStatus): BrandWithOwner[] {
+  const db = getDb();
+  const base = `
+    SELECT b.*, u.display_name AS owner_display_name, u.email AS owner_email
+    FROM brands b
+    LEFT JOIN users u ON u.id = b.owner_user_id
+  `;
+  if (status) {
+    return db.prepare(`${base} WHERE b.status = ? ORDER BY b.created_at DESC`).all(status) as BrandWithOwner[];
+  }
+  return db.prepare(`${base} ORDER BY b.created_at DESC`).all() as BrandWithOwner[];
+}
+
+/**
+ * Is a candidate slug available for a new brand request? Reuses
+ * validateBrandSlug (format + reserved guard) then checks uniqueness against
+ * existing brands of ANY status (a pending request already holds its slug).
+ * `reserved` should be the live buildReservedSlugs(clientDir) set; when omitted
+ * validateBrandSlug falls back to the static reserved set.
+ */
+export function getSlugAvailability(
+  raw: string,
+  reserved?: ReadonlySet<string>,
+): { available: boolean; reason?: string } {
+  const check = validateBrandSlug(raw, reserved);
+  if (!check.ok) return { available: false, reason: check.error };
+  if (getBrandBySlug(check.slug)) {
+    return { available: false, reason: 'That URL is already taken' };
+  }
+  return { available: true };
 }
 
 export function setBrandStatus(id: string, status: BrandStatus): Brand | null {

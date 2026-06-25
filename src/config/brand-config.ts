@@ -50,7 +50,7 @@ export const RESERVED_PAGE_SLUGS: readonly string[] = [
   // root *.html present as files but not in PAGES
   'how-to-play',
   // brand feature pages + reserved app words
-  'brand-admin', 'admin-brands', 'brands', 'account', 'menu', 'host', 'join',
+  'brand-admin', 'admin-brands', 'brand-signup', 'brands', 'account', 'menu', 'host', 'join',
 ];
 
 /** The always-on reserved set, independent of any filesystem scan. */
