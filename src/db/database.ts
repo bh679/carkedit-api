@@ -1141,17 +1141,21 @@ export function getGameStateDurations(filters: GameFilters = {}): GameStateDurat
 
 export type UserStatsDevFilter = 'all' | 'dev' | 'nodev';
 
-export function getUserGameStats(opts: { devFilter?: UserStatsDevFilter; limit?: number } = {}): {
+export function getUserGameStats(opts: { devFilter?: UserStatsDevFilter; limit?: number; brandId?: string } = {}): {
   players: UserGameStat[];
   total_distinct: number;
   total_matched_users: number;
 } {
   const devFilter = opts.devFilter ?? 'nodev';
   const limit = Math.min(Math.max(opts.limit ?? 200, 1), 1000);
+  const brandId = opts.brandId;
 
   let devClause = '';
   if (devFilter === 'nodev') devClause = 'AND g.is_dev = 0';
   else if (devFilter === 'dev') devClause = 'AND g.is_dev = 1';
+  // Brand scope: players who appear in games hosted by a brand account
+  // (games.host_user_id → users.brand_id). Aggregation stays by anonymous player_name.
+  const brandClause = brandId ? 'AND g.host_user_id IN (SELECT id FROM users WHERE brand_id = ?)' : '';
 
   const sql = `
     WITH player_agg AS (
@@ -1166,7 +1170,7 @@ export function getUserGameStats(opts: { devFilter?: UserStatsDevFilter; limit?:
         COUNT(DISTINCT g.host_user_id)         AS distinct_host_user_ids
       FROM game_players gp
       JOIN games g ON g.id = gp.game_id
-      WHERE 1=1 ${devClause}
+      WHERE 1=1 ${devClause} ${brandClause}
       GROUP BY LOWER(TRIM(gp.player_name))
     ),
     user_match AS (
@@ -1190,14 +1194,14 @@ export function getUserGameStats(opts: { devFilter?: UserStatsDevFilter; limit?:
     LIMIT ?
   `;
 
-  const rows = db.prepare(sql).all(limit) as UserGameStat[];
+  const rows = db.prepare(sql).all(...(brandId ? [brandId, limit] : [limit])) as UserGameStat[];
 
   const totalRow = db.prepare(`
     SELECT COUNT(DISTINCT LOWER(TRIM(gp.player_name))) AS total
     FROM game_players gp
     JOIN games g ON g.id = gp.game_id
-    WHERE 1=1 ${devClause}
-  `).get() as { total: number };
+    WHERE 1=1 ${devClause} ${brandClause}
+  `).get(...(brandId ? [brandId] : [])) as { total: number };
 
   const matched = rows.reduce((n, r) => n + (r.matched_user_id ? 1 : 0), 0);
 
@@ -1238,11 +1242,21 @@ export function saveCardDraws(draws: CardDraw[]): void {
   transaction(draws);
 }
 
-export function getCardStats(devFilter: 'all' | 'dev' | 'nodev' = 'all'): { cards: CardStat[] } {
-  let devWherePlay = '';
-  let devWhereDraw = '';
-  if (devFilter === 'dev') { devWherePlay = 'WHERE g.is_dev = 1'; devWhereDraw = 'WHERE g2.is_dev = 1'; }
-  if (devFilter === 'nodev') { devWherePlay = 'WHERE g.is_dev = 0'; devWhereDraw = 'WHERE g2.is_dev = 0'; }
+export function getCardStats(devFilter: 'all' | 'dev' | 'nodev' = 'all', brandId?: string): { cards: CardStat[] } {
+  const playConds: string[] = [];
+  const drawConds: string[] = [];
+  const playParams: any[] = [];
+  const drawParams: any[] = [];
+  if (devFilter === 'dev')   { playConds.push('g.is_dev = 1'); drawConds.push('g2.is_dev = 1'); }
+  if (devFilter === 'nodev') { playConds.push('g.is_dev = 0'); drawConds.push('g2.is_dev = 0'); }
+  // Brand scope: a card play/draw's brand is DERIVED from its game's server-verified
+  // host (games.host_user_id → users.brand_id), mirroring the games filter.
+  if (brandId) {
+    playConds.push('g.host_user_id IN (SELECT id FROM users WHERE brand_id = ?)');  playParams.push(brandId);
+    drawConds.push('g2.host_user_id IN (SELECT id FROM users WHERE brand_id = ?)'); drawParams.push(brandId);
+  }
+  const devWherePlay = playConds.length ? 'WHERE ' + playConds.join(' AND ') : '';
+  const devWhereDraw = drawConds.length ? 'WHERE ' + drawConds.join(' AND ') : '';
 
   // Build draw counts
   const drawCounts = db.prepare(`
@@ -1251,7 +1265,7 @@ export function getCardStats(devFilter: 'all' | 'dev' | 'nodev' = 'all'): { card
     JOIN games g2 ON d.game_id = g2.id
     ${devWhereDraw}
     GROUP BY d.card_id, d.card_deck
-  `).all() as { card_id: string; card_deck: string; draw_count: number }[];
+  `).all(...drawParams) as { card_id: string; card_deck: string; draw_count: number }[];
 
   const drawMap = new Map<string, number>();
   for (const d of drawCounts) {
@@ -1267,7 +1281,7 @@ export function getCardStats(devFilter: 'all' | 'dev' | 'nodev' = 'all'): { card
     JOIN games g ON cp.game_id = g.id
     ${devWherePlay}
     GROUP BY cp.card_id, cp.card_deck
-  `).all() as (CardStat & { win_count: number })[];
+  `).all(...playParams) as (CardStat & { win_count: number })[];
 
   // Build lookup of played cards keyed by "deck:id"
   const playedMap = new Map<string, CardStat & { win_count: number }>();
@@ -1414,14 +1428,23 @@ export function saveSurveyResponse(r: SurveyResponse): boolean {
 
 export type SurveyDevFilter = 'all' | 'dev' | 'nodev';
 
-function devWhere(filter: SurveyDevFilter): string {
-  if (filter === 'dev') return 'WHERE is_dev = 1';
-  if (filter === 'nodev') return 'WHERE is_dev = 0';
-  return '';
+function surveyConditions(filter: SurveyDevFilter, brandId?: string): { where: string; params: any[] } {
+  const conds: string[] = [];
+  const params: any[] = [];
+  if (filter === 'dev') conds.push('is_dev = 1');
+  else if (filter === 'nodev') conds.push('is_dev = 0');
+  // Brand scope: a survey's brand is DERIVED from its game's server-verified host
+  // (survey_responses.game_id → games.host_user_id → users.brand_id). Surveys with
+  // a NULL game_id can't be attributed to a brand, so they're excluded.
+  if (brandId) {
+    conds.push('game_id IN (SELECT id FROM games WHERE host_user_id IN (SELECT id FROM users WHERE brand_id = ?))');
+    params.push(brandId);
+  }
+  return { where: conds.length ? 'WHERE ' + conds.join(' AND ') : '', params };
 }
 
-export function getSurveyStats(devFilter: SurveyDevFilter = 'all'): SurveyStats {
-  const where = devWhere(devFilter);
+export function getSurveyStats(devFilter: SurveyDevFilter = 'all', brandId?: string): SurveyStats {
+  const { where, params } = surveyConditions(devFilter, brandId);
   const row = db.prepare(`
     SELECT
       COUNT(*) as count,
@@ -1432,7 +1455,7 @@ export function getSurveyStats(devFilter: SurveyDevFilter = 'all'): SurveyStats 
       SUM(CASE WHEN nps_score BETWEEN 7 AND 8 THEN 1 ELSE 0 END) as passives,
       SUM(CASE WHEN nps_score <= 6 THEN 1 ELSE 0 END) as detractors
     FROM survey_responses ${where}
-  `).get() as any;
+  `).get(...params) as any;
 
   const count = row.count as number;
   const promoters = row.promoters as number;
@@ -1453,13 +1476,13 @@ export function getSurveyStats(devFilter: SurveyDevFilter = 'all'): SurveyStats 
   };
 }
 
-export function getSurveyResponses(limit = 50, offset = 0, devFilter: SurveyDevFilter = 'all'): { responses: SurveyResponse[]; total: number } {
-  const where = devWhere(devFilter);
-  const total = (db.prepare(`SELECT COUNT(*) as c FROM survey_responses ${where}`).get() as { c: number }).c;
+export function getSurveyResponses(limit = 50, offset = 0, devFilter: SurveyDevFilter = 'all', brandId?: string): { responses: SurveyResponse[]; total: number } {
+  const { where, params } = surveyConditions(devFilter, brandId);
+  const total = (db.prepare(`SELECT COUNT(*) as c FROM survey_responses ${where}`).get(...params) as { c: number }).c;
   const responses = db.prepare(`
     SELECT id, created_at, game_id, player_name, session_id, nps_score, comment, improvement, client_version, is_dev
     FROM survey_responses ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?
-  `).all(limit, offset) as SurveyResponse[];
+  `).all(...params, limit, offset) as SurveyResponse[];
   return { responses, total };
 }
 

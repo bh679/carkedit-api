@@ -32,6 +32,9 @@ export const SLUG_REGEX = /^[a-z0-9-]{2,40}$/;
 export const RESERVED_PREFIXES: readonly string[] = [
   'api', 'uploads', '__', 'assets', 'css', 'js', 'scripts', 'mockups', 'docs',
   'node_modules', 'tests', 'ports', 'data', 'dist',
+  // 'admin' is the second segment of the owner panel (/<slug>/admin); reserving
+  // it as a top-level prefix keeps a brand from claiming the bare /admin slug.
+  'admin',
 ];
 
 /**
