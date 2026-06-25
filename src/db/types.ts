@@ -47,6 +47,10 @@ export interface UserGameStat {
   birth_month: number | null;
   birth_day: number | null;
   matched_user_created_at: string | null;
+  /** Partner brand the matched account signed up under (null = signed up on root / no account). */
+  signup_brand_id: string | null;
+  signup_brand_name: string | null;
+  signup_brand_slug: string | null;
 }
 
 export interface GameSummary {

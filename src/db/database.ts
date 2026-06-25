@@ -1201,11 +1201,15 @@ export function getUserGameStats(opts: { devFilter?: UserStatsDevFilter; limit?:
     ),
     user_match AS (
       SELECT
-        LOWER(TRIM(display_name)) AS name_key,
-        id, display_name, email, avatar_url,
-        birth_month, birth_day, created_at,
-        ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(display_name)) ORDER BY created_at) AS rn
-      FROM users
+        LOWER(TRIM(u.display_name)) AS name_key,
+        u.id, u.display_name, u.email, u.avatar_url,
+        u.birth_month, u.birth_day, u.created_at,
+        u.brand_id      AS signup_brand_id,
+        b.name          AS signup_brand_name,
+        b.slug          AS signup_brand_slug,
+        ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(u.display_name)) ORDER BY u.created_at) AS rn
+      FROM users u
+      LEFT JOIN brands b ON b.id = u.brand_id
     )
     SELECT
       p.name_key, p.display_name, p.games_played, p.total_seconds,
@@ -1213,7 +1217,8 @@ export function getUserGameStats(opts: { devFilter?: UserStatsDevFilter; limit?:
       p.distinct_host_ips, p.distinct_host_user_ids,
       u.id   AS matched_user_id,
       u.email, u.avatar_url, u.birth_month, u.birth_day,
-      u.created_at AS matched_user_created_at
+      u.created_at AS matched_user_created_at,
+      u.signup_brand_id, u.signup_brand_name, u.signup_brand_slug
     FROM player_agg p
     LEFT JOIN user_match u ON u.name_key = p.name_key AND u.rn = 1
     ORDER BY p.total_seconds DESC, p.games_played DESC

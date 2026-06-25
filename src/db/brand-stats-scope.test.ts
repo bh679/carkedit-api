@@ -94,6 +94,23 @@ describe('brand-scoped stats viewers (games.brand_id play attribution)', () => {
     expect(scoped.players.map((p) => p.display_name)).toEqual(['Alice']);
   });
 
+  it('getUserGameStats reports each matched player\'s SIGNUP brand (users.brand_id)', () => {
+    // Players Alice (g1) and Bob (g2) get accounts: Alice signed up UNDER the
+    // brand, Bob on root (no brand). The "signed up" column reads these.
+    createUser({ display_name: 'Alice', firebase_uid: 'uid_alice', email: 'alice@example.com', brand_id: brandId });
+    createUser({ display_name: 'Bob', firebase_uid: 'uid_bob', email: 'bob@example.com' });
+
+    const players = getUserGameStats({ devFilter: 'all' }).players;
+    const alice = players.find((p) => p.display_name === 'Alice');
+    const bob = players.find((p) => p.display_name === 'Bob');
+
+    expect(alice?.signup_brand_id).toBe(brandId);
+    expect(alice?.signup_brand_name).toBe('Acme');   // → brand name in the column
+    expect(bob?.matched_user_id).toBeTruthy();
+    expect(bob?.signup_brand_id).toBeNull();          // → "Root" in the column
+    expect(bob?.signup_brand_name).toBeNull();
+  });
+
   it('listPackStatsAll exposes each pack creator brand_id (for the client "Brand packs" filter)', () => {
     const brandPack = createPack({ creator_id: member.id, title: 'Brand Pack' });
     const otherPack = createPack({ creator_id: outsider.id, title: 'Other Pack' });
