@@ -14,10 +14,10 @@ import { createBrand, listBrandUsers } from './brands.js';
 import { createPack, listPackStatsAll } from './packs.js';
 import type { GameResult } from './types.js';
 
-// Every brand-scoped viewer derives its brand the SAME way games do:
-// the row → its game → games.host_user_id → users.brand_id. These tests assert
-// each aggregation function counts ONLY brand-hosted activity when given brandId.
-function hostedGame(id: string, hostUserId: string, winner: string): GameResult {
+// Game/card/survey/player scope follows games.brand_id (PLAY attribution — the
+// brand URL the game was created on); pack-creator + signups scope still follow
+// users.brand_id. These tests assert each aggregation counts ONLY brand activity.
+function hostedGame(id: string, hostUserId: string, winner: string, brandId?: string | null): GameResult {
   return {
     id,
     finished_at: '2026-06-20T00:00:00.000Z',
@@ -31,6 +31,7 @@ function hostedGame(id: string, hostUserId: string, winner: string): GameResult 
     has_error: false,
     is_dev: false,
     host_user_id: hostUserId,
+    brand_id: brandId ?? null,
     players: [{ player_name: winner, score: 5, rank: 1 }],
   };
 }
@@ -38,7 +39,7 @@ function hostedGame(id: string, hostUserId: string, winner: string): GameResult 
 const sumPlays = (r: { cards: { play_count: number }[] }) => r.cards.reduce((n, c) => n + c.play_count, 0);
 const sumDraws = (r: { cards: { draw_count: number }[] }) => r.cards.reduce((n, c) => n + c.draw_count, 0);
 
-describe('brand-scoped stats viewers (derived host_user_id → users.brand_id)', () => {
+describe('brand-scoped stats viewers (games.brand_id play attribution)', () => {
   let brandId: string;
   let member: { id: string };
   let outsider: { id: string };
@@ -51,8 +52,9 @@ describe('brand-scoped stats viewers (derived host_user_id → users.brand_id)',
     member = createUser({ display_name: 'Member', firebase_uid: 'uid_m', email: 'm@example.com', brand_id: brand.id });
     outsider = createUser({ display_name: 'Outsider', firebase_uid: 'uid_o', email: 'o@example.com' });
 
-    // g1 hosted by a brand member; g2 hosted by an outsider.
-    saveGameResult(hostedGame('g1', member.id, 'Alice'));
+    // g1 created on the brand URL (games.brand_id tagged); g2 untagged. Hosts
+    // differ too, to prove brand scope follows the GAME tag, not the host.
+    saveGameResult(hostedGame('g1', member.id, 'Alice', brand.id));
     saveGameResult(hostedGame('g2', outsider.id, 'Bob'));
   });
 

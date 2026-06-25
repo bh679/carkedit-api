@@ -4,6 +4,16 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import type { GameResult, GameSummary, GameDetail, GameDetailCardPlay, GamePlayerResult, CardPlay, CardDraw, CardStat, IssueReport, GameEvent, GameEventRow, SurveyResponse, SurveyStats, UserGameStat } from './types.js';
 import { DIE_CARDS, LIVING_CARDS, BYE_CARDS } from '../data/cards.js';
+import { getBrandById } from './brands.js';
+
+// Validate a client-supplied game brand tag: keep it only if it names a real
+// brand, else drop to null. Game brand is play attribution (the brand URL the
+// game was created on) — client-supplied and thus only trusted to an existing
+// brand (stats-only; see plan P5b).
+function validGameBrandId(brandId?: string | null): string | null {
+  if (!brandId || typeof brandId !== 'string') return null;
+  return getBrandById(brandId) ? brandId : null;
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.resolve(__dirname, '../../data/games.db');
@@ -60,7 +70,8 @@ export function initDatabase(dbPath: string = DB_PATH): void {
       client_version TEXT,
       settings_json TEXT,
       host_ip_hash TEXT,
-      host_user_id TEXT
+      host_user_id TEXT,
+      brand_id TEXT
     );
 
     CREATE TABLE IF NOT EXISTS game_players (
@@ -312,6 +323,9 @@ export function initDatabase(dbPath: string = DB_PATH): void {
     ['client_version', 'ALTER TABLE games ADD COLUMN client_version TEXT'],
     ['host_ip_hash', 'ALTER TABLE games ADD COLUMN host_ip_hash TEXT'],
     ['host_user_id', 'ALTER TABLE games ADD COLUMN host_user_id TEXT'],
+    // Partner-brand PLAY attribution: which brand URL the game was created on
+    // (set once at creation from window.brand; distinct from users.brand_id signup attribution).
+    ['brand_id', 'ALTER TABLE games ADD COLUMN brand_id TEXT'],
   ];
   for (const [col, sql] of migrations) {
     if (!cols.includes(col)) {
@@ -320,6 +334,7 @@ export function initDatabase(dbPath: string = DB_PATH): void {
   }
   db.exec('CREATE INDEX IF NOT EXISTS idx_games_host_user_id ON games(host_user_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_games_host_ip_hash ON games(host_ip_hash)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_games_brand_id ON games(brand_id)');
 
   // Migrate: add missing columns to users if needed (for existing DBs)
   const userCols = db.prepare("PRAGMA table_info(users)").all().map((c: any) => c.name);
@@ -456,8 +471,8 @@ export function saveGameResult(result: GameResult): string {
   const insertGame = db.prepare(`
     INSERT INTO games (id, started_at, finished_at, mode, room_code, host_name, rounds, player_count,
       winner_name, winner_score, duration_seconds, status, live_status, has_error, is_dev,
-      api_version, client_version, settings_json, host_ip_hash, host_user_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      api_version, client_version, settings_json, host_ip_hash, host_user_id, brand_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertPlayer = db.prepare(`
@@ -472,7 +487,7 @@ export function saveGameResult(result: GameResult): string {
       r.duration_seconds ?? null, r.status, r.live_status,
       r.has_error ? 1 : 0, r.is_dev ? 1 : 0,
       r.api_version ?? null, r.client_version ?? null, r.settings_json ?? null,
-      r.host_ip_hash ?? null, r.host_user_id ?? null
+      r.host_ip_hash ?? null, r.host_user_id ?? null, validGameBrandId(r.brand_id)
     );
     for (const p of r.players) {
       insertPlayer.run(r.id, p.player_name, p.score, p.rank);
@@ -494,19 +509,20 @@ export interface LiveGameData {
   api_version?: string;
   host_ip_hash?: string;
   host_user_id?: string;
+  brand_id?: string | null;
 }
 
 export function createLiveGame(data: LiveGameData): string {
   db.prepare(`
     INSERT INTO games (id, started_at, finished_at, mode, room_code, host_name, rounds, player_count,
       winner_name, winner_score, duration_seconds, status, live_status, has_error, is_dev,
-      api_version, client_version, settings_json, host_ip_hash, host_user_id)
-    VALUES (?, ?, '', ?, ?, ?, 0, ?, '', 0, NULL, 'lobby', 'live', 0, ?, ?, NULL, NULL, ?, ?)
+      api_version, client_version, settings_json, host_ip_hash, host_user_id, brand_id)
+    VALUES (?, ?, '', ?, ?, ?, 0, ?, '', 0, NULL, 'lobby', 'live', 0, ?, ?, NULL, NULL, ?, ?, ?)
   `).run(
     data.id, data.started_at, data.mode, data.room_code ?? null,
     data.host_name ?? null, data.player_count,
     data.is_dev ? 1 : 0, data.api_version ?? null,
-    data.host_ip_hash ?? null, data.host_user_id ?? null
+    data.host_ip_hash ?? null, data.host_user_id ?? null, validGameBrandId(data.brand_id)
   );
   return data.id;
 }
@@ -677,12 +693,11 @@ function buildConditions(filters: GameFilters, exclude: Set<FilterDim> = new Set
     conditions.push('g.host_user_id = ?');
     params.push(filters.hostUserId);
   }
-  // Brand-scoped: a game's brand is DERIVED from its server-verified host
-  // (games.host_user_id → users.brand_id), never a games column — so this is
-  // non-spoofable. Never added to any `exclude` set, so brand scope holds across
-  // every filter-count breakdown.
+  // Brand-scoped: a game's brand is its PLAY attribution — the brand URL the
+  // game was created on (games.brand_id, set once at creation). Never added to
+  // any `exclude` set, so brand scope holds across every filter-count breakdown.
   if (!exclude.has('brand') && filters.brandId) {
-    conditions.push('g.host_user_id IN (SELECT id FROM users WHERE brand_id = ?)');
+    conditions.push('g.brand_id = ?');
     params.push(filters.brandId);
   }
 
@@ -922,15 +937,13 @@ export function getGameById(id: string): GameDetail | null {
   return game;
 }
 
-// True iff game `gameId` is hosted by a member of brand `brandId`. A game's
-// brand is DERIVED from its host (games.host_user_id → users.brand_id), the
-// same scoping the brand stats viewers use. Lets the owner-gated single-game
-// route reject games outside the owner's brand without leaking their existence.
+// True iff game `gameId` belongs to brand `brandId` — i.e. it was created on
+// that brand's URL (games.brand_id play attribution), the same scoping the brand
+// stats viewers use. Lets the owner-gated single-game route reject games outside
+// the owner's brand without leaking their existence.
 export function gameBelongsToBrand(gameId: string, brandId: string): boolean {
   const row = db.prepare(
-    `SELECT 1 FROM games
-     WHERE id = ? AND host_user_id IN (SELECT id FROM users WHERE brand_id = ?)
-     LIMIT 1`
+    `SELECT 1 FROM games WHERE id = ? AND brand_id = ? LIMIT 1`
   ).get(gameId, brandId);
   return !!row;
 }
@@ -1166,9 +1179,9 @@ export function getUserGameStats(opts: { devFilter?: UserStatsDevFilter; limit?:
   let devClause = '';
   if (devFilter === 'nodev') devClause = 'AND g.is_dev = 0';
   else if (devFilter === 'dev') devClause = 'AND g.is_dev = 1';
-  // Brand scope: players who appear in games hosted by a brand account
-  // (games.host_user_id → users.brand_id). Aggregation stays by anonymous player_name.
-  const brandClause = brandId ? 'AND g.host_user_id IN (SELECT id FROM users WHERE brand_id = ?)' : '';
+  // Brand scope: players who appear in games created on the brand URL
+  // (games.brand_id play attribution). Aggregation stays by anonymous player_name.
+  const brandClause = brandId ? 'AND g.brand_id = ?' : '';
 
   const sql = `
     WITH player_agg AS (
@@ -1262,11 +1275,11 @@ export function getCardStats(devFilter: 'all' | 'dev' | 'nodev' = 'all', brandId
   const drawParams: any[] = [];
   if (devFilter === 'dev')   { playConds.push('g.is_dev = 1'); drawConds.push('g2.is_dev = 1'); }
   if (devFilter === 'nodev') { playConds.push('g.is_dev = 0'); drawConds.push('g2.is_dev = 0'); }
-  // Brand scope: a card play/draw's brand is DERIVED from its game's server-verified
-  // host (games.host_user_id → users.brand_id), mirroring the games filter.
+  // Brand scope: a card play/draw's brand is its game's play attribution
+  // (games.brand_id — the brand URL the game was created on), mirroring the games filter.
   if (brandId) {
-    playConds.push('g.host_user_id IN (SELECT id FROM users WHERE brand_id = ?)');  playParams.push(brandId);
-    drawConds.push('g2.host_user_id IN (SELECT id FROM users WHERE brand_id = ?)'); drawParams.push(brandId);
+    playConds.push('g.brand_id = ?');  playParams.push(brandId);
+    drawConds.push('g2.brand_id = ?'); drawParams.push(brandId);
   }
   const devWherePlay = playConds.length ? 'WHERE ' + playConds.join(' AND ') : '';
   const devWhereDraw = drawConds.length ? 'WHERE ' + drawConds.join(' AND ') : '';
@@ -1446,11 +1459,11 @@ function surveyConditions(filter: SurveyDevFilter, brandId?: string): { where: s
   const params: any[] = [];
   if (filter === 'dev') conds.push('is_dev = 1');
   else if (filter === 'nodev') conds.push('is_dev = 0');
-  // Brand scope: a survey's brand is DERIVED from its game's server-verified host
-  // (survey_responses.game_id → games.host_user_id → users.brand_id). Surveys with
-  // a NULL game_id can't be attributed to a brand, so they're excluded.
+  // Brand scope: a survey's brand is its game's play attribution
+  // (survey_responses.game_id → games.brand_id — the brand URL the game was created on).
+  // Surveys with a NULL game_id can't be attributed to a brand, so they're excluded.
   if (brandId) {
-    conds.push('game_id IN (SELECT id FROM games WHERE host_user_id IN (SELECT id FROM users WHERE brand_id = ?))');
+    conds.push('game_id IN (SELECT id FROM games WHERE brand_id = ?)');
     params.push(brandId);
   }
   return { where: conds.length ? 'WHERE ' + conds.join(' AND ') : '', params };

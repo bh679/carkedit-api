@@ -355,7 +355,7 @@ const server = defineServer({
     // Game history endpoints
     app.post("/api/carkedit/games", publicWriteLimiter, publicBodyLimit, optionalAuth(), (req: any, res: any) => {
       try {
-        const { mode, rounds, players, settings, finishedAt, startedAt, hostName, status, clientVersion, isDev } = req.body;
+        const { mode, rounds, players, settings, finishedAt, startedAt, hostName, status, clientVersion, isDev, brandId } = req.body;
         if (!players || !Array.isArray(players) || players.length === 0) {
           return res.status(400).json({ error: "players array is required" });
         }
@@ -388,6 +388,7 @@ const server = defineServer({
           settings_json: settings ? JSON.stringify(settings) : undefined,
           host_ip_hash: hashIp(req.ip) ?? undefined,
           host_user_id: req.localUser?.id ?? undefined,
+          brand_id: brandId,  // play attribution (brand URL the game was created on); validated in saveGameResult
           players: sorted.map((p: any, i: number) => coerceGamePlayer(p, i + 1)),
         };
 
