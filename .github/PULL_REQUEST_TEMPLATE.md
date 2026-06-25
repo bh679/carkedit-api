@@ -24,3 +24,6 @@
 - What changed:
 - How to test on staging:
 - Screenshots / links:
+
+## Release Note
+<!-- Curated, player-facing summary for the public release log (play.carkedit.com/news). 1–3 plain-language sentences a player would understand — no internal jargon. Leave this section empty for internal-only changes (chore/ci/refactor/docs/test). -->
