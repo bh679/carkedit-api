@@ -12,7 +12,7 @@ import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
 import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameFilterCounts, getGameById, getStats, getStatsByPeriod, getGamesStats, getGameStateDurations, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev, saveMailingListEntry, getUserGameStats } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag, setUserRole } from "./db/users.js";
-import { createBrand, getBrandBySlug, getApprovedBrandBySlug, listBrands, listBrandsByOwner, listBrandUsers, setBrandStatus } from "./db/brands.js";
+import { createBrand, getBrandBySlug, getApprovedBrandBySlug, listBrandsByOwner, listBrandsWithOwner, listBrandUsers, getSlugAvailability, setBrandStatus } from "./db/brands.js";
 import { validateBrandSlug, buildReservedSlugs } from "./config/brand-config.js";
 import type { BrandStatus } from "./db/types.js";
 import { listPagePermissions, setPagePermission } from "./db/page-permissions.js";
@@ -867,9 +867,24 @@ const server = defineServer({
       }
     });
 
-    // Owner: brands owned by the signed-in user — lets the brand-admin page
-    // discover its brand id without knowing it up front. Registered BEFORE the
-    // "/brands/:id/..." routes so "mine" is never captured as an :id.
+    // Admin: list all brands (optionally filtered by status) for the review UI,
+    // enriched with each owner's name/email so the admin sees WHO is requesting.
+    app.get("/api/carkedit/brands", requireAdmin(), (req: any, res: any) => {
+      try {
+        const status = req.query.status as string | undefined;
+        if (status && !BRAND_STATUSES.includes(status as BrandStatus)) {
+          return res.status(400).json({ error: "Invalid status filter" });
+        }
+        res.json({ brands: listBrandsWithOwner(status as BrandStatus | undefined) });
+      } catch (err) {
+        console.error("[CarkedIt API] List brands error:", err);
+        res.status(500).json({ error: "Failed to list brands" });
+      }
+    });
+
+    // Auth'd user: list the brands they own — drives the account-screen request
+    // section (shows their current request + its status). Distinct literal path,
+    // so it never collides with the by-slug / slug-available sub-routes.
     app.get("/api/carkedit/brands/mine", requireAuth(), (req: any, res: any) => {
       try {
         res.json({ brands: listBrandsByOwner(req.localUser!.id) });
@@ -879,9 +894,23 @@ const server = defineServer({
       }
     });
 
+    // Auth'd user: is a candidate slug usable? Powers the live availability hint
+    // on the request form before submit. Reuses the same reserved-slug guard +
+    // uniqueness check the POST /brands handler enforces.
+    app.get("/api/carkedit/brands/slug-available/:slug", requireAuth(), (req: any, res: any) => {
+      try {
+        res.json(getSlugAvailability(String(req.params.slug || ''), reservedSlugs));
+      } catch (err) {
+        console.error("[CarkedIt API] Slug availability error:", err);
+        res.status(500).json({ error: "Failed to check slug" });
+      }
+    });
+
     // Owner-gated: brand-scoped game stats. Brand is DERIVED from the
     // server-verified host (games.host_user_id → users.brand_id), so the numbers
     // are non-spoofable. Reuses getGamesStats/getRecentGames — no new aggregation.
+    // Registered AFTER the literal /brands/mine + /brands/slug-available routes so
+    // the param ":id" never shadows them.
     app.get("/api/carkedit/brands/:id/stats", requireBrandOwner(), (req: any, res: any) => {
       try {
         res.json({
@@ -901,20 +930,6 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Brand users error:", err);
         res.status(500).json({ error: "Failed to retrieve brand users" });
-      }
-    });
-
-    // Admin: list all brands (optionally filtered by status) for the review UI.
-    app.get("/api/carkedit/brands", requireAdmin(), (req: any, res: any) => {
-      try {
-        const status = req.query.status as string | undefined;
-        if (status && !BRAND_STATUSES.includes(status as BrandStatus)) {
-          return res.status(400).json({ error: "Invalid status filter" });
-        }
-        res.json({ brands: listBrands(status as BrandStatus | undefined) });
-      } catch (err) {
-        console.error("[CarkedIt API] List brands error:", err);
-        res.status(500).json({ error: "Failed to list brands" });
       }
     });
 

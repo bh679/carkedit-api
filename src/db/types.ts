@@ -199,6 +199,12 @@ export interface Brand {
   updated_at: string;
 }
 
+/** A brand row enriched with its owner's display name + email (admin review UI). */
+export interface BrandWithOwner extends Brand {
+  owner_display_name: string | null;
+  owner_email: string | null;
+}
+
 export interface ExpansionPack {
   id: string;
   creator_id: string;

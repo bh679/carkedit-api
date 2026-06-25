@@ -57,7 +57,7 @@ describe('reserved-slug guard', () => {
   });
 
   it('reserves the new brand-feature pages', () => {
-    for (const p of ['brand-admin', 'admin-brands', 'brands']) {
+    for (const p of ['brand-admin', 'admin-brands', 'brand-signup', 'brands']) {
       expect(validateBrandSlug(p).ok).toBe(false);
     }
   });
