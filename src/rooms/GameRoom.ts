@@ -23,6 +23,13 @@ const apiPkg = JSON.parse(fs.readFileSync(path.join(__dirnameGR, "../../package.
 
 const MIN_PLAYERS = 2;
 
+// How long (seconds) a disconnected player's seat is held open for reconnection
+// during an active game. iOS/iPadOS Safari suspends backgrounded tabs and tears
+// down the WebSocket; the player can't run any reconnect JS until they return to
+// the tab. A 5-minute window gives realistic headroom for a quick tab-switch
+// without holding abandoned seats indefinitely.
+const RECONNECTION_WINDOW_SECONDS = 300;
+
 function generateRoomCode(): string {
   return ROOM_CODE_WORDS[Math.floor(Math.random() * ROOM_CODE_WORDS.length)];
 }
@@ -398,9 +405,10 @@ export class GameRoom extends Room<{ state: GameState }> {
       return;
     }
 
-    // Allow reconnection for 2 minutes during active game phases
+    // Hold the seat open during active game phases so a player whose socket
+    // dropped (e.g. iOS backgrounded the tab) can reconnect. See constant docs.
     try {
-      await this.allowReconnection(client, 120);
+      await this.allowReconnection(client, RECONNECTION_WINDOW_SECONDS);
       player.connected = true;
       this.logEvent(client, "player_reconnected", { name: player.name });
       console.log(`[GameRoom] ${player.name} reconnected`);
