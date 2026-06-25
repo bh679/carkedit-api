@@ -52,6 +52,7 @@ export class GameState extends Schema {
   @type("boolean") timerAutoAdvance: boolean = true;
   @type("boolean") ultraQuickMode: boolean = false;
   @type("boolean") optionalCardPlay: boolean = false;
+  @type("boolean") showCardReveal: boolean = false;
 
   // Expansion packs selected for this game (host-editable in lobby)
   @type(["string"]) selectedPackIds = new ArraySchema<string>();

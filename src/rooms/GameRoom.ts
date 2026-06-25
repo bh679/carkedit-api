@@ -439,7 +439,7 @@ export class GameRoom extends Room<{ state: GameState }> {
       "autoStartOnReady", "enableDie", "enableLive", "enableBye", "enableEulogy",
       "playableWildcards", "optionalCardPlay", "ultraQuickMode",
       "timerEnabled", "pitchTimerEnabled", "playCardTimerEnabled",
-      "timerCountUp", "timerVisible", "timerAutoAdvance",
+      "timerCountUp", "timerVisible", "timerAutoAdvance", "showCardReveal",
     ];
     if (boolKeys.includes(key) && typeof value === "boolean") {
       (this.state as any)[key] = value;
@@ -523,7 +523,7 @@ export class GameRoom extends Room<{ state: GameState }> {
       const settingKeys = [
         "rounds", "handSize", "enableDie", "enableLive", "enableBye", "enableEulogy",
         "forceWildcards", "playableWildcards", "wildcardCount", "eulogistCount",
-        "optionalCardPlay", "ultraQuickMode", "timerEnabled", "pitchDuration",
+        "optionalCardPlay", "ultraQuickMode", "timerEnabled", "pitchDuration", "showCardReveal",
       ];
       for (const key of settingKeys) {
         settings[key] = (this.state as any)[key];
