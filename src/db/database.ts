@@ -922,6 +922,19 @@ export function getGameById(id: string): GameDetail | null {
   return game;
 }
 
+// True iff game `gameId` is hosted by a member of brand `brandId`. A game's
+// brand is DERIVED from its host (games.host_user_id → users.brand_id), the
+// same scoping the brand stats viewers use. Lets the owner-gated single-game
+// route reject games outside the owner's brand without leaking their existence.
+export function gameBelongsToBrand(gameId: string, brandId: string): boolean {
+  const row = db.prepare(
+    `SELECT 1 FROM games
+     WHERE id = ? AND host_user_id IN (SELECT id FROM users WHERE brand_id = ?)
+     LIMIT 1`
+  ).get(gameId, brandId);
+  return !!row;
+}
+
 export function setGameDev(gameId: string, isDev: boolean): GameDetail | null {
   const result = db.prepare('UPDATE games SET is_dev = ? WHERE id = ?').run(isDev ? 1 : 0, gameId);
   if (result.changes === 0) return null;

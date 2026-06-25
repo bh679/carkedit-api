@@ -10,7 +10,7 @@ import multer from "multer";
 import helmet from "helmet";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
-import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameFilterCounts, getGameById, getStats, getStatsByPeriod, getGamesStats, getGameStateDurations, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev, saveMailingListEntry, getUserGameStats } from "./db/database.js";
+import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameFilterCounts, getGameById, getStats, getStatsByPeriod, getGamesStats, getGameStateDurations, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev, saveMailingListEntry, getUserGameStats, gameBelongsToBrand } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, setAdminFlag, setUserRole } from "./db/users.js";
 import { createBrand, getBrandBySlug, getApprovedBrandBySlug, listBrandsByOwner, listBrandsWithOwner, listBrandUsers, getSlugAvailability, setBrandStatus } from "./db/brands.js";
 import { validateBrandSlug, buildReservedSlugs } from "./config/brand-config.js";
@@ -958,6 +958,24 @@ const server = defineServer({
       } catch (err) {
         console.error("[CarkedIt API] Brand filter counts error:", err);
         res.status(500).json({ error: "Failed to retrieve brand filter counts" });
+      }
+    });
+
+    // Single-game detail, brand-scoped. Mirrors the global GET /games/:id but
+    // gated by requireBrandOwner AND restricted to games hosted by the brand
+    // (getGameById has no brand filter). Registered AFTER /games/stats and
+    // /games/filter-counts so ':gameId' can't shadow those literal segments.
+    // Out-of-brand or missing games both return 404 (don't leak existence).
+    app.get("/api/carkedit/brands/:id/games/:gameId", requireBrandOwner(), (req: any, res: any) => {
+      try {
+        const game = getGameById(req.params.gameId);
+        if (!game || !gameBelongsToBrand(req.params.gameId, req.params.id)) {
+          return res.status(404).json({ error: "Game not found" });
+        }
+        res.json(game);
+      } catch (err) {
+        console.error("[CarkedIt API] Brand game detail error:", err);
+        res.status(500).json({ error: "Failed to retrieve brand game" });
       }
     });
 
