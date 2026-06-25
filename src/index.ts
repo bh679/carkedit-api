@@ -11,7 +11,7 @@ import helmet from "helmet";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
 import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameFilterCounts, getGameById, getStats, getStatsByPeriod, getGamesStats, getGameStateDurations, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev, saveMailingListEntry, getUserGameStats } from "./db/database.js";
-import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, hasAnyAdmin, setAdminFlag, setUserRole } from "./db/users.js";
+import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, setAdminFlag, setUserRole } from "./db/users.js";
 import { createBrand, getBrandBySlug, getApprovedBrandBySlug, listBrandsByOwner, listBrandsWithOwner, getSlugAvailability, setBrandStatus } from "./db/brands.js";
 import { validateBrandSlug, buildReservedSlugs } from "./config/brand-config.js";
 import type { BrandStatus } from "./db/types.js";
@@ -708,19 +708,12 @@ const server = defineServer({
       }
     });
 
-    // Bootstrap: promote caller to admin if no admins exist yet
-    app.post("/api/carkedit/admin/bootstrap", requireAuth(), (req: any, res: any) => {
-      try {
-        if (hasAnyAdmin()) {
-          return res.status(403).json({ error: "Admin already exists. Use the admin panel to manage users." });
-        }
-        const user = setAdminFlag(req.localUser!.id, true);
-        res.json(user);
-      } catch (err) {
-        console.error("[CarkedIt API] Bootstrap admin error:", err);
-        res.status(500).json({ error: "Failed to bootstrap admin" });
-      }
-    });
+    // Admin provisioning is handled solely by the ADMIN_EMAILS allowlist
+    // (applyAdminAllowlist in db/users.ts), which promotes a verified
+    // allowlisted email to Admin on sign-in. The former self-service
+    // POST /admin/bootstrap route was removed — it self-promoted the first
+    // signed-in user whenever the DB had zero admins, a privilege-escalation
+    // vector. There is intentionally no in-app way to grant the first admin.
 
     // List all users (admin only)
     app.get("/api/carkedit/users", requireAdmin(), (_req: any, res: any) => {
