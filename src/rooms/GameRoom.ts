@@ -98,6 +98,7 @@ export class GameRoom extends Room<{ state: GameState }> {
         player_count: 0,
         is_dev: this.state.devMode,
         api_version: apiPkg.version,
+        brand_id: options?.brandId,  // play attribution (brand URL host created on); validated in createLiveGame
       });
       console.log(`[GameRoom] Live game created in DB: ${this._gameId}`);
     } catch (err) {

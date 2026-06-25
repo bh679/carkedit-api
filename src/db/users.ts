@@ -3,10 +3,21 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getDb } from './database.js';
+import { getBrandById } from './brands.js';
 import type { User } from './types.js';
 import type { Role } from '../auth/roles.js';
 import { isAdminEmail } from '../auth/admin-emails.js';
 import { postWebhookEmbed, buildAccountCreatedEmbed } from '../services/discord/webhook.js';
+
+/**
+ * Resolve a client-supplied brand id to a stored brand id, or null. Brand
+ * attribution is advisory metadata, so an unknown id is silently dropped
+ * (never an error). Applied only at account creation.
+ */
+function validBrandId(brandId?: string | null): string | null {
+  if (!brandId || typeof brandId !== 'string') return null;
+  return getBrandById(brandId) ? brandId : null;
+}
 
 const __pkgDir = path.dirname(fileURLToPath(import.meta.url));
 const __apiPkg = JSON.parse(fs.readFileSync(path.join(__pkgDir, '../../package.json'), 'utf-8'));
@@ -32,6 +43,7 @@ export function createUser(data: {
   avatar_url?: string | null;
   birth_month?: number;
   birth_day?: number;
+  brand_id?: string | null;
 }): User {
   const db = getDb();
   const id = `usr_${randomUUID()}`;
@@ -57,9 +69,9 @@ export function createUser(data: {
   }
 
   db.prepare(`
-    INSERT INTO users (id, firebase_uid, display_name, email, avatar_url, birth_month, birth_day, role)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'Host')
-  `).run(id, data.firebase_uid ?? null, data.display_name, data.email ?? null, data.avatar_url ?? null, bm, bd);
+    INSERT INTO users (id, firebase_uid, display_name, email, avatar_url, birth_month, birth_day, role, brand_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'Host', ?)
+  `).run(id, data.firebase_uid ?? null, data.display_name, data.email ?? null, data.avatar_url ?? null, bm, bd, validBrandId(data.brand_id));
 
   const created = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User;
   notifyAccountCreated(created, data.firebase_uid ? 'firebase' : 'anonymous');
@@ -148,7 +160,7 @@ export function upsertUserFromFirebase(firebaseUser: {
   name?: string;
   picture?: string;
   email_verified?: boolean;
-}): User {
+}, brandId?: string | null): User {
   const db = getDb();
   const existing = db.prepare('SELECT * FROM users WHERE firebase_uid = ?').get(firebaseUser.uid) as User | undefined;
 
@@ -178,9 +190,9 @@ export function upsertUserFromFirebase(firebaseUser: {
 
   const id = `usr_${randomUUID()}`;
   db.prepare(`
-    INSERT INTO users (id, firebase_uid, display_name, email, avatar_url, birth_month, birth_day, role)
-    VALUES (?, ?, ?, ?, ?, 0, 0, 'Host')
-  `).run(id, firebaseUser.uid, firebaseUser.name || '', firebaseUser.email ?? null, firebaseUser.picture ?? null);
+    INSERT INTO users (id, firebase_uid, display_name, email, avatar_url, birth_month, birth_day, role, brand_id)
+    VALUES (?, ?, ?, ?, ?, 0, 0, 'Host', ?)
+  `).run(id, firebaseUser.uid, firebaseUser.name || '', firebaseUser.email ?? null, firebaseUser.picture ?? null, validBrandId(brandId));
 
   const created = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User;
   notifyAccountCreated(created, 'firebase');
