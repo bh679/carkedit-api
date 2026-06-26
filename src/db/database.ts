@@ -540,6 +540,23 @@ export function updateLiveGame(id: string, updates: { playerCount?: number; stat
   db.prepare(`UPDATE games SET ${sets.join(', ')} WHERE id = ? AND live_status = 'live'`).run(...params);
 }
 
+/**
+ * Snapshot an in-progress (live) game's current roster into game_players so the
+ * player/users stats reflect ACTIVE games, not just completed ones. Replaces any
+ * existing rows for the game (idempotent); score/rank are placeholders until
+ * completeLiveGame writes the final results.
+ */
+export function syncLivePlayers(gameId: string, playerNames: string[]): void {
+  const names = playerNames.map((n) => (n ?? '').trim()).filter((n) => n.length > 0);
+  const del = db.prepare('DELETE FROM game_players WHERE game_id = ?');
+  const ins = db.prepare('INSERT INTO game_players (game_id, player_name, score, rank) VALUES (?, ?, 0, ?)');
+  const tx = db.transaction(() => {
+    del.run(gameId);
+    names.forEach((name, i) => ins.run(gameId, name, i + 1));
+  });
+  tx();
+}
+
 export interface CompleteLiveGameData {
   finished_at: string;
   rounds: number;
@@ -570,6 +587,9 @@ export function completeLiveGame(id: string, data: CompleteLiveGameData): void {
     INSERT INTO game_players (game_id, player_name, score, rank)
     VALUES (?, ?, ?, ?)
   `);
+  // Clear any live-roster snapshot rows (from syncLivePlayers) so the final
+  // results replace them instead of duplicating players.
+  const deletePlayers = db.prepare('DELETE FROM game_players WHERE game_id = ?');
 
   const transaction = db.transaction(() => {
     updateGame.run(
@@ -579,6 +599,7 @@ export function completeLiveGame(id: string, data: CompleteLiveGameData): void {
       data.host_ip_hash ?? null, data.host_user_id ?? null,
       id
     );
+    deletePlayers.run(id);
     for (const p of data.players) {
       insertPlayer.run(id, p.player_name, p.score, p.rank);
     }
