@@ -1188,7 +1188,7 @@ export function getGameStateDurations(filters: GameFilters = {}): GameStateDurat
 
 export type UserStatsDevFilter = 'all' | 'dev' | 'nodev';
 
-export function getUserGameStats(opts: { devFilter?: UserStatsDevFilter; limit?: number; brandId?: string } = {}): {
+export function getUserGameStats(opts: { devFilter?: UserStatsDevFilter; limit?: number; brandId?: string; includeAccounts?: boolean } = {}): {
   players: UserGameStat[];
   total_distinct: number;
   total_matched_users: number;
@@ -1196,15 +1196,20 @@ export function getUserGameStats(opts: { devFilter?: UserStatsDevFilter; limit?:
   const devFilter = opts.devFilter ?? 'nodev';
   const limit = Math.min(Math.max(opts.limit ?? 200, 1), 1000);
   const brandId = opts.brandId;
+  // includeAccounts folds this brand's signed-up accounts INTO the player list
+  // (even ones that never played), so the brand admin's Users list replaces the
+  // old standalone "signed-up accounts" section. Only meaningful with a brandId.
+  const includeAccounts = !!opts.includeAccounts && !!brandId;
 
   let devClause = '';
   if (devFilter === 'nodev') devClause = 'AND g.is_dev = 0';
   else if (devFilter === 'dev') devClause = 'AND g.is_dev = 1';
-  // Brand scope: players who appear in games created on the brand URL
-  // (games.brand_id play attribution). Aggregation stays by anonymous player_name.
+  // Player (PLAY-attribution) scope: appears in a game created on the brand URL.
   const brandClause = brandId ? 'AND g.brand_id = ?' : '';
 
-  const sql = `
+  // Shared CTEs: game-player aggregation + one canonical account per name, plus
+  // a `keys` set = player names UNION (when includeAccounts) this brand's signups.
+  const ctes = `
     WITH player_agg AS (
       SELECT
         LOWER(TRIM(gp.player_name))            AS name_key,
@@ -1220,47 +1225,69 @@ export function getUserGameStats(opts: { devFilter?: UserStatsDevFilter; limit?:
       WHERE 1=1 ${devClause} ${brandClause}
       GROUP BY LOWER(TRIM(gp.player_name))
     ),
-    user_match AS (
-      SELECT
-        LOWER(TRIM(u.display_name)) AS name_key,
-        u.id, u.display_name, u.email, u.avatar_url,
-        u.birth_month, u.birth_day, u.created_at,
-        u.brand_id      AS signup_brand_id,
-        b.name          AS signup_brand_name,
-        b.slug          AS signup_brand_slug,
-        ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(u.display_name)) ORDER BY u.created_at) AS rn
-      FROM users u
-      LEFT JOIN brands b ON b.id = u.brand_id
-    )
+    acct1 AS (
+      SELECT name_key, id, display_name, email, avatar_url, birth_month, birth_day,
+             created_at, signup_brand_id, signup_brand_name, signup_brand_slug
+      FROM (
+        SELECT
+          LOWER(TRIM(u.display_name)) AS name_key,
+          u.id, u.display_name, u.email, u.avatar_url,
+          u.birth_month, u.birth_day, u.created_at,
+          u.brand_id AS signup_brand_id, b.name AS signup_brand_name, b.slug AS signup_brand_slug,
+          ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(u.display_name)) ORDER BY u.created_at) AS rn
+        FROM users u
+        LEFT JOIN brands b ON b.id = u.brand_id
+      ) WHERE rn = 1
+    ),
+    keys AS (
+      SELECT name_key FROM player_agg
+      ${includeAccounts
+        ? `UNION SELECT name_key FROM acct1 WHERE signup_brand_id = ? AND name_key NOT IN (SELECT name_key FROM player_agg)`
+        : ''}
+    )`;
+
+  const sql = `
+    ${ctes}
     SELECT
-      p.name_key, p.display_name, p.games_played, p.total_seconds,
+      k.name_key,
+      COALESCE(p.display_name, a.display_name)  AS display_name,
+      COALESCE(p.games_played, 0)               AS games_played,
+      COALESCE(p.total_seconds, 0)              AS total_seconds,
       p.first_game_at, p.last_game_at,
-      p.distinct_host_ips, p.distinct_host_user_ids,
-      u.id   AS matched_user_id,
-      u.email, u.avatar_url, u.birth_month, u.birth_day,
-      u.created_at AS matched_user_created_at,
-      u.signup_brand_id, u.signup_brand_name, u.signup_brand_slug
-    FROM player_agg p
-    LEFT JOIN user_match u ON u.name_key = p.name_key AND u.rn = 1
-    ORDER BY p.total_seconds DESC, p.games_played DESC
+      COALESCE(p.distinct_host_ips, 0)          AS distinct_host_ips,
+      COALESCE(p.distinct_host_user_ids, 0)     AS distinct_host_user_ids,
+      a.id   AS matched_user_id,
+      a.email, a.avatar_url, a.birth_month, a.birth_day,
+      a.created_at AS matched_user_created_at,
+      a.signup_brand_id, a.signup_brand_name, a.signup_brand_slug
+    FROM keys k
+    LEFT JOIN player_agg p ON p.name_key = k.name_key
+    LEFT JOIN acct1 a      ON a.name_key = k.name_key
+    ORDER BY COALESCE(p.total_seconds, 0) DESC, COALESCE(p.games_played, 0) DESC, display_name ASC
     LIMIT ?
   `;
+  const rowParams: any[] = [];
+  if (brandId) rowParams.push(brandId);          // player_agg brand scope
+  if (includeAccounts) rowParams.push(brandId);  // signup-inject scope
+  rowParams.push(limit);
+  const rows = db.prepare(sql).all(...rowParams) as UserGameStat[];
 
-  const rows = db.prepare(sql).all(...(brandId ? [brandId, limit] : [limit])) as UserGameStat[];
-
-  const totalRow = db.prepare(`
-    SELECT COUNT(DISTINCT LOWER(TRIM(gp.player_name))) AS total
-    FROM game_players gp
-    JOIN games g ON g.id = gp.game_id
-    WHERE 1=1 ${devClause} ${brandClause}
-  `).get(...(brandId ? [brandId] : [])) as { total: number };
-
-  const matched = rows.reduce((n, r) => n + (r.matched_user_id ? 1 : 0), 0);
+  const countSql = `
+    ${ctes}
+    SELECT COUNT(*) AS total,
+           SUM(CASE WHEN a.id IS NOT NULL THEN 1 ELSE 0 END) AS matched
+    FROM keys k
+    LEFT JOIN acct1 a ON a.name_key = k.name_key
+  `;
+  const countParams: any[] = [];
+  if (brandId) countParams.push(brandId);
+  if (includeAccounts) countParams.push(brandId);
+  const totalRow = db.prepare(countSql).get(...countParams) as { total: number; matched: number };
 
   return {
     players: rows,
     total_distinct: totalRow.total ?? 0,
-    total_matched_users: matched,
+    total_matched_users: totalRow.matched ?? 0,
   };
 }
 

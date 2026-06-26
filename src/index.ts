@@ -1012,7 +1012,9 @@ const server = defineServer({
     app.get("/api/carkedit/brands/:id/users/stats", requireBrandOwner(), (req: any, res: any) => {
       try {
         const limit = parseInt((req.query.limit as string) || '200', 10);
-        res.json(getUserGameStats({ devFilter: brandDevFilter(req.query), limit, brandId: req.params.id }));
+        // includeAccounts folds this brand's signed-up accounts into the list
+        // (replaces the old standalone "signed-up accounts" section).
+        res.json(getUserGameStats({ devFilter: brandDevFilter(req.query), limit, brandId: req.params.id, includeAccounts: true }));
       } catch (err) {
         console.error("[CarkedIt API] Brand user stats error:", err);
         res.status(500).json({ error: "Failed to retrieve brand user stats" });

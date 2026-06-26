@@ -111,6 +111,23 @@ describe('brand-scoped stats viewers (games.brand_id play attribution)', () => {
     expect(bob?.signup_brand_name).toBeNull();
   });
 
+  it('includeAccounts folds in this brand\'s signups who never played (replaces the old section)', () => {
+    // beforeEach: "Member" signed up under the brand but never played (only
+    // Alice/Bob appear as players). g1 is Alice's brand-hosted game.
+    const playersOnly = getUserGameStats({ devFilter: 'all', brandId }).players;
+    expect(playersOnly.map((p) => p.display_name)).toEqual(['Alice']);   // signup-only Member absent
+
+    const withAccts = getUserGameStats({ devFilter: 'all', brandId, includeAccounts: true });
+    const names = withAccts.players.map((p) => p.display_name).sort();
+    expect(names).toEqual(['Alice', 'Member']);                          // Member folded in
+    const memberRow = withAccts.players.find((p) => p.display_name === 'Member');
+    expect(memberRow?.games_played).toBe(0);                             // never played
+    expect(memberRow?.matched_user_id).toBe(member.id);
+    expect(memberRow?.signup_brand_id).toBe(brandId);                    // → filterable as "your brand"
+    // Outsider (no brand) is NOT folded into a brand-scoped list.
+    expect(names).not.toContain('Outsider');
+  });
+
   it('listPackStatsAll exposes each pack creator brand_id (for the client "Brand packs" filter)', () => {
     const brandPack = createPack({ creator_id: member.id, title: 'Brand Pack' });
     const otherPack = createPack({ creator_id: outsider.id, title: 'Other Pack' });
