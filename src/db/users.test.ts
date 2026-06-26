@@ -1,5 +1,5 @@
-import { initDatabase } from './database.js';
-import { upsertUserFromFirebase, createUser, setUserRole, listUsers, getUserById } from './users.js';
+import { initDatabase, getDb } from './database.js';
+import { upsertUserFromFirebase, createUser, setUserRole, listUsers, getUserById, linkAnonymousUserToFirebase } from './users.js';
 import { isAdminEmail, parseAdminEmails } from '../auth/admin-emails.js';
 
 // Each test runs against a fresh in-memory DB (full schema + migrations), so
@@ -112,6 +112,62 @@ describe('createUser — empty display_name never overwrites an existing name', 
     createUser({ display_name: 'Old', firebase_uid: 'uid_upd' });
     const updated = createUser({ display_name: 'New', firebase_uid: 'uid_upd' });
     expect(updated.display_name).toBe('New');
+  });
+});
+
+describe('linkAnonymousUserToFirebase — migrates ALL users.id references before delete', () => {
+  beforeEach(() => {
+    initDatabase(':memory:');
+  });
+
+  // Seed a pack, a favorite (on that pack), and a brand all owned by `userId`.
+  const seedOwned = (userId: string, suffix: string) => {
+    const db = getDb();
+    const packId = `pack_${suffix}`;
+    db.prepare('INSERT INTO expansion_packs (id, creator_id, title) VALUES (?, ?, ?)').run(packId, userId, `Pack ${suffix}`);
+    db.prepare('INSERT INTO pack_favorites (user_id, pack_id) VALUES (?, ?)').run(userId, packId);
+    db.prepare('INSERT INTO brands (id, slug, name, owner_user_id) VALUES (?, ?, ?, ?)')
+      .run(`brand_${suffix}`, `slug-${suffix}`, `Brand ${suffix}`, userId);
+    return packId;
+  };
+
+  it('links without throwing and re-points pack/favorite/brand to the Firebase user (regression for FK failure)', () => {
+    const anon = createUser({ display_name: 'Guest' });               // firebase_uid NULL
+    const fb = upsertUserFromFirebase({ uid: 'uid_fb', email: 'fb@example.com', name: 'FB', email_verified: true });
+    const packId = seedOwned(anon.id, 'anon');
+
+    const result = linkAnonymousUserToFirebase(anon.id, 'uid_fb');
+
+    expect(result!.id).toBe(fb.id);
+    expect(getUserById(anon.id)).toBeNull();                          // anon row deleted
+    const db = getDb();
+    expect((db.prepare('SELECT creator_id FROM expansion_packs WHERE id = ?').get(packId) as any).creator_id).toBe(fb.id);
+    expect((db.prepare('SELECT user_id FROM pack_favorites WHERE pack_id = ?').get(packId) as any).user_id).toBe(fb.id);
+    expect((db.prepare('SELECT owner_user_id FROM brands WHERE id = ?').get('brand_anon') as any).owner_user_id).toBe(fb.id);
+  });
+
+  it('handles a favorite the target already has (no PK collision, no orphan anon rows)', () => {
+    const anon = createUser({ display_name: 'Guest' });
+    const fb = upsertUserFromFirebase({ uid: 'uid_fb', email: 'fb@example.com', name: 'FB', email_verified: true });
+    const db = getDb();
+    // Shared pack favorited by BOTH anon and the Firebase user → would violate
+    // pack_favorites PK (user_id, pack_id) on a naive UPDATE.
+    db.prepare('INSERT INTO expansion_packs (id, creator_id, title) VALUES (?, ?, ?)').run('pack_shared', fb.id, 'Shared');
+    db.prepare('INSERT INTO pack_favorites (user_id, pack_id) VALUES (?, ?)').run(anon.id, 'pack_shared');
+    db.prepare('INSERT INTO pack_favorites (user_id, pack_id) VALUES (?, ?)').run(fb.id, 'pack_shared');
+
+    expect(() => linkAnonymousUserToFirebase(anon.id, 'uid_fb')).not.toThrow();
+    expect(getUserById(anon.id)).toBeNull();
+    const favs = db.prepare('SELECT user_id FROM pack_favorites WHERE pack_id = ?').all('pack_shared') as any[];
+    expect(favs).toHaveLength(1);                                     // de-duped to one
+    expect(favs[0].user_id).toBe(fb.id);
+  });
+
+  it('is a no-op when the anonymous id already equals the Firebase row id', () => {
+    const fb = upsertUserFromFirebase({ uid: 'uid_fb', email: 'fb@example.com', name: 'FB', email_verified: true });
+    const result = linkAnonymousUserToFirebase(fb.id, 'uid_fb');
+    expect(result!.id).toBe(fb.id);
+    expect(listUsers()).toHaveLength(1);
   });
 });
 

@@ -266,9 +266,19 @@ export function linkAnonymousUserToFirebase(anonymousUserId: string, firebaseUid
     if (existingFirebase.id === anonymousUserId) {
       return existingFirebase;
     }
-    // Migrate packs from anonymous to existing Firebase user
+    // Migrate every users.id reference from the anonymous row to the existing
+    // Firebase user, THEN delete the anon row. All three FKs are NO ACTION, so a
+    // single leftover reference makes the DELETE fail (SQLITE_CONSTRAINT_FOREIGNKEY)
+    // and rolls the whole link back.
     const transaction = db.transaction(() => {
       db.prepare('UPDATE expansion_packs SET creator_id = ? WHERE creator_id = ?')
+        .run(existingFirebase.id, anonymousUserId);
+      // pack_favorites PK is (user_id, pack_id): OR IGNORE skips a favorite the
+      // target already has, then drop the anon's leftover (now-duplicate) rows.
+      db.prepare('UPDATE OR IGNORE pack_favorites SET user_id = ? WHERE user_id = ?')
+        .run(existingFirebase.id, anonymousUserId);
+      db.prepare('DELETE FROM pack_favorites WHERE user_id = ?').run(anonymousUserId);
+      db.prepare('UPDATE brands SET owner_user_id = ? WHERE owner_user_id = ?')
         .run(existingFirebase.id, anonymousUserId);
       db.prepare('DELETE FROM users WHERE id = ?').run(anonymousUserId);
     });
