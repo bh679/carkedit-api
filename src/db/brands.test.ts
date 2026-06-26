@@ -34,6 +34,17 @@ describe('brands data access', () => {
     expect(getApprovedBrandBySlug('acme')).toBeNull();
   });
 
+  it('stores the chosen plan and defaults it to null', () => {
+    const owner = makeOwner();
+    const pro = createBrand({ slug: 'pro-co', name: 'Pro Co', owner_user_id: owner.id, plan: 'pro' });
+    expect(pro.plan).toBe('pro');
+    expect(getBrandBySlug('pro-co')?.plan).toBe('pro');
+
+    // Omitted plan persists as null (e.g. signups not coming from the pricing page).
+    const none = createBrand({ slug: 'none-co', name: 'None Co', owner_user_id: owner.id });
+    expect(none.plan).toBeNull();
+  });
+
   it('only resolves a slug once approved', () => {
     const owner = makeOwner();
     const brand = createBrand({ slug: 'acme', name: 'Acme', owner_user_id: owner.id });

@@ -1063,6 +1063,11 @@ const server = defineServer({
           if (req.file) fs.unlink(req.file.path, () => {});
           return res.status(409).json({ error: "That URL is already taken" });
         }
+        // Optional plan tier chosen on the pricing page; attribution only (never
+        // gates access). Unknown/absent values are stored as null, not rejected.
+        const ALLOWED_PLANS = ['basic', 'pro', 'ultimate'];
+        const rawPlan = typeof req.body?.plan === 'string' ? req.body.plan.trim().toLowerCase() : '';
+        const plan = ALLOWED_PLANS.includes(rawPlan) ? rawPlan : null;
         const logo_url = req.file ? `/uploads/brands/${req.file.filename}` : null;
         const brand = createBrand({
           slug: slugCheck.slug,
@@ -1070,6 +1075,7 @@ const server = defineServer({
           owner_user_id: req.localUser!.id,
           logo_url,
           status: 'pending',
+          plan,
         });
         res.status(201).json(brand);
 

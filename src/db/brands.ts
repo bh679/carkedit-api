@@ -15,13 +15,14 @@ export function createBrand(data: {
   owner_user_id: string;
   logo_url?: string | null;
   status?: BrandStatus;
+  plan?: string | null;
 }): Brand {
   const db = getDb();
   const id = `brand_${randomUUID()}`;
   db.prepare(`
-    INSERT INTO brands (id, slug, name, logo_url, owner_user_id, status)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, data.slug, data.name, data.logo_url ?? null, data.owner_user_id, data.status ?? 'pending');
+    INSERT INTO brands (id, slug, name, logo_url, owner_user_id, status, plan)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(id, data.slug, data.name, data.logo_url ?? null, data.owner_user_id, data.status ?? 'pending', data.plan ?? null);
   return db.prepare('SELECT * FROM brands WHERE id = ?').get(id) as Brand;
 }
 
