@@ -206,6 +206,11 @@ export interface Brand {
   logo_url: string | null;
   owner_user_id: string;
   status: BrandStatus;
+  /** Subscription plan chosen at signup ('basic'|'pro'|'ultimate'); null if none. */
+  plan: string | null;
+  /** Contact details captured at signup (email pre-filled from the account). */
+  contact_email: string | null;
+  contact_phone: string | null;
   theme_json: string | null;
   custom_domain: string | null;
   created_at: string;

@@ -1,6 +1,6 @@
 {
   "name": "carkedit-api",
-  "version": "0.04.0001",
+  "version": "0.04.0006",
   "description": "CarkedIt multiplayer card game server",
   "type": "module",
   "main": "src/index.ts",
@@ -10,7 +10,7 @@
   "scripts": {
     "prepare": "node scripts/install-githooks.js",
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-assets.mjs",
     "start": "node dist/index.js",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest"
   },
