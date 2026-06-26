@@ -62,6 +62,16 @@ export const RESERVED_PAGE_SLUGS: readonly string[] = [
   'company', 'companies', 'business', 'businesses', 'agency', 'agencies',
   'team', 'teams', 'group', 'groups', 'enterprise', 'enterprises',
   'foundation', 'charity', 'nonprofit', 'institution', 'association',
+  // generic app / routing words that should never be a vanity URL
+  'id', 'new', 'restart', 'home', 'back', 'next', 'prev', 'previous', 'continue',
+  'reset', 'help', 'about', 'settings', 'setup', 'profile', 'dashboard',
+  'login', 'logout', 'signin', 'signout', 'signup', 'register',
+  // core game words (incl. the three deck names + flow controls)
+  'game', 'games', 'play', 'player', 'players', 'lobby', 'room', 'rooms',
+  'round', 'rounds', 'score', 'scores', 'scoreboard', 'leaderboard',
+  'start', 'pause', 'resume', 'quit', 'exit', 'spectate', 'replay',
+  'rules', 'deck', 'decks', 'card', 'cards', 'hand', 'turn', 'phase',
+  'eulogy', 'die', 'live', 'bye', 'wildcard',
 ];
 
 /** The always-on reserved set, independent of any filesystem scan. */
