@@ -2,11 +2,13 @@ import { initDatabase } from './database.js';
 import { createUser } from './users.js';
 import {
   createBrand,
+  updateBrand,
   getBrandBySlug,
   getApprovedBrandBySlug,
   listBrands,
   listBrandsByOwner,
   listBrandsWithOwner,
+  listBrandUsers,
   getSlugAvailability,
   setBrandStatus,
   setBrandLogo,
@@ -31,6 +33,68 @@ describe('brands data access', () => {
     expect(getBrandBySlug('acme')?.id).toBe(brand.id);
     // Pending brands must NOT resolve as approved (slug stays dark until review).
     expect(getApprovedBrandBySlug('acme')).toBeNull();
+  });
+
+  it('stores the chosen plan and defaults it to null', () => {
+    const owner = makeOwner();
+    const pro = createBrand({ slug: 'pro-co', name: 'Pro Co', owner_user_id: owner.id, plan: 'pro' });
+    expect(pro.plan).toBe('pro');
+    expect(getBrandBySlug('pro-co')?.plan).toBe('pro');
+
+    // Omitted plan persists as null (e.g. signups not coming from the pricing page).
+    const none = createBrand({ slug: 'none-co', name: 'None Co', owner_user_id: owner.id });
+    expect(none.plan).toBeNull();
+  });
+
+  it('stores contact email + phone, defaulting to null when omitted', () => {
+    const owner = makeOwner();
+    const withContact = createBrand({
+      slug: 'contact-co', name: 'Contact Co', owner_user_id: owner.id,
+      contact_email: 'owner@example.com', contact_phone: '+61 400 000 000',
+    });
+    expect(withContact.contact_email).toBe('owner@example.com');
+    expect(withContact.contact_phone).toBe('+61 400 000 000');
+    const stored = getBrandBySlug('contact-co');
+    expect(stored?.contact_email).toBe('owner@example.com');
+    expect(stored?.contact_phone).toBe('+61 400 000 000');
+
+    const none = createBrand({ slug: 'plain-co', name: 'Plain Co', owner_user_id: owner.id });
+    expect(none.contact_email).toBeNull();
+    expect(none.contact_phone).toBeNull();
+  });
+
+  it('updateBrand edits provided fields and leaves status untouched', () => {
+    const owner = makeOwner();
+    const b = createBrand({
+      slug: 'edit-co', name: 'Edit Co', owner_user_id: owner.id, status: 'approved', plan: 'basic',
+      contact_email: 'a@example.com', contact_phone: '111',
+    });
+    const updated = updateBrand(b.id, {
+      name: 'Edited Co', slug: 'edited-co', plan: 'pro',
+      contact_email: 'b@example.com', contact_phone: '222',
+    });
+    expect(updated?.name).toBe('Edited Co');
+    expect(updated?.slug).toBe('edited-co');
+    expect(updated?.plan).toBe('pro');
+    expect(updated?.contact_email).toBe('b@example.com');
+    expect(updated?.contact_phone).toBe('222');
+    // Status is preserved across an owner edit.
+    expect(updated?.status).toBe('approved');
+    // Persisted under the new slug.
+    expect(getBrandBySlug('edited-co')?.id).toBe(b.id);
+  });
+
+  it('updateBrand only touches the columns provided', () => {
+    const owner = makeOwner();
+    const b = createBrand({ slug: 'partial-co', name: 'Partial Co', owner_user_id: owner.id, plan: 'ultimate' });
+    const updated = updateBrand(b.id, { contact_phone: '999' });
+    expect(updated?.contact_phone).toBe('999');
+    expect(updated?.name).toBe('Partial Co'); // untouched
+    expect(updated?.plan).toBe('ultimate');   // untouched
+  });
+
+  it('updateBrand returns null for an unknown id', () => {
+    expect(updateBrand('brand_missing', { name: 'x' })).toBeNull();
   });
 
   it('only resolves a slug once approved', () => {
@@ -62,6 +126,27 @@ describe('brands data access', () => {
 
     const withLogo = setBrandLogo(approved.id, '/uploads/brands/a.png');
     expect(withLogo?.logo_url).toBe('/uploads/brands/a.png');
+  });
+
+  it('lists only brand-tagged users, newest first, PII-limited', () => {
+    const owner = makeOwner();
+    const brand = createBrand({ slug: 'acme', name: 'Acme', owner_user_id: owner.id, status: 'approved' });
+    const other = createBrand({ slug: 'other', name: 'Other', owner_user_id: owner.id, status: 'approved' });
+
+    const u1 = createUser({ display_name: 'First', firebase_uid: 'uid_1', email: 'one@example.com', brand_id: brand.id });
+    const u2 = createUser({ display_name: 'Second', firebase_uid: 'uid_2', email: 'two@example.com', brand_id: brand.id });
+    createUser({ display_name: 'Outsider', firebase_uid: 'uid_3', email: 'three@example.com' }); // no brand
+    createUser({ display_name: 'OtherBrand', firebase_uid: 'uid_4', email: 'four@example.com', brand_id: other.id });
+
+    const members = listBrandUsers(brand.id);
+    // Only the two acme-tagged accounts (owner row itself has no brand_id).
+    expect(members.map((m) => m.id).sort()).toEqual([u1.id, u2.id].sort());
+    // Newest first (created_at DESC; ties resolve by insertion, so u2 ≥ u1).
+    expect(new Date(members[0].created_at).getTime()).toBeGreaterThanOrEqual(
+      new Date(members[1].created_at).getTime(),
+    );
+    // PII-limited shape — no email / firebase_uid leaked.
+    expect(Object.keys(members[0]).sort()).toEqual(['created_at', 'display_name', 'id']);
   });
 
   describe('listBrandsWithOwner', () => {

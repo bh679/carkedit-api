@@ -92,8 +92,9 @@ After implementation is complete:
 
 After user testing passes:
 1. Create a PR with a clear title and description
-2. Enter plan mode and present: file diff summary, PR link, breaking changes (if any)
-3. Wait for user approval, then merge
+2. **Fill in the PR's `## Release Note`** with a curated, player-facing summary for the public release log (play.carkedit.com/news): 1–3 plain-language sentences a player would understand, no internal jargon. Pre-fill the change `type` from the PR title prefix (feat/fix/etc.) and seed from `## Changes`. Leave it empty for internal-only changes (chore/ci/refactor/docs/test). Write **one curated note per feature, not per PR** — for paired online+api PRs put the note on a single PR so the public log doesn't double-count. Surface the drafted note to the user for confirmation before merging.
+3. Enter plan mode and present: file diff summary, PR link, breaking changes (if any)
+4. Wait for user approval, then merge
 
 **Never merge without Gate 3 approval — not even for hotfixes.**
 

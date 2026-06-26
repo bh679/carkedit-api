@@ -4,6 +4,16 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import type { GameResult, GameSummary, GameDetail, GameDetailCardPlay, GamePlayerResult, CardPlay, CardDraw, CardStat, IssueReport, GameEvent, GameEventRow, SurveyResponse, SurveyStats, UserGameStat } from './types.js';
 import { DIE_CARDS, LIVING_CARDS, BYE_CARDS } from '../data/cards.js';
+import { getBrandById } from './brands.js';
+
+// Validate a client-supplied game brand tag: keep it only if it names a real
+// brand, else drop to null. Game brand is play attribution (the brand URL the
+// game was created on) — client-supplied and thus only trusted to an existing
+// brand (stats-only; see plan P5b).
+function validGameBrandId(brandId?: string | null): string | null {
+  if (!brandId || typeof brandId !== 'string') return null;
+  return getBrandById(brandId) ? brandId : null;
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.resolve(__dirname, '../../data/games.db');
@@ -60,7 +70,8 @@ export function initDatabase(dbPath: string = DB_PATH): void {
       client_version TEXT,
       settings_json TEXT,
       host_ip_hash TEXT,
-      host_user_id TEXT
+      host_user_id TEXT,
+      brand_id TEXT
     );
 
     CREATE TABLE IF NOT EXISTS game_players (
@@ -162,6 +173,9 @@ export function initDatabase(dbPath: string = DB_PATH): void {
       logo_url TEXT,
       owner_user_id TEXT NOT NULL REFERENCES users(id),
       status TEXT NOT NULL DEFAULT 'pending',
+      plan TEXT,
+      contact_email TEXT,
+      contact_phone TEXT,
       theme_json TEXT,
       custom_domain TEXT UNIQUE,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -312,6 +326,9 @@ export function initDatabase(dbPath: string = DB_PATH): void {
     ['client_version', 'ALTER TABLE games ADD COLUMN client_version TEXT'],
     ['host_ip_hash', 'ALTER TABLE games ADD COLUMN host_ip_hash TEXT'],
     ['host_user_id', 'ALTER TABLE games ADD COLUMN host_user_id TEXT'],
+    // Partner-brand PLAY attribution: which brand URL the game was created on
+    // (set once at creation from window.brand; distinct from users.brand_id signup attribution).
+    ['brand_id', 'ALTER TABLE games ADD COLUMN brand_id TEXT'],
   ];
   for (const [col, sql] of migrations) {
     if (!cols.includes(col)) {
@@ -320,6 +337,7 @@ export function initDatabase(dbPath: string = DB_PATH): void {
   }
   db.exec('CREATE INDEX IF NOT EXISTS idx_games_host_user_id ON games(host_user_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_games_host_ip_hash ON games(host_ip_hash)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_games_brand_id ON games(brand_id)');
 
   // Migrate: add missing columns to users if needed (for existing DBs)
   const userCols = db.prepare("PRAGMA table_info(users)").all().map((c: any) => c.name);
@@ -341,6 +359,26 @@ export function initDatabase(dbPath: string = DB_PATH): void {
     db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'Host'");
     db.exec("UPDATE users SET role = 'Admin' WHERE is_admin = 1");
     db.exec('CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)');
+  }
+  // Partner-brand attribution: which brand a user signed up under (nullable,
+  // written once at account creation, read by no auth/host/join path).
+  if (!userCols.includes('brand_id')) {
+    db.exec('ALTER TABLE users ADD COLUMN brand_id TEXT');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_users_brand_id ON users(brand_id)');
+  }
+
+  // Subscription plan the requester chose on the pricing page (nullable;
+  // 'basic' | 'pro' | 'ultimate'). Attribution only — never gates access.
+  const brandCols = db.prepare("PRAGMA table_info(brands)").all().map((c: any) => c.name);
+  if (brandCols.length > 0 && !brandCols.includes('plan')) {
+    db.exec('ALTER TABLE brands ADD COLUMN plan TEXT');
+  }
+  // Contact details captured at signup so an admin can reach the requester.
+  if (brandCols.length > 0 && !brandCols.includes('contact_email')) {
+    db.exec('ALTER TABLE brands ADD COLUMN contact_email TEXT');
+  }
+  if (brandCols.length > 0 && !brandCols.includes('contact_phone')) {
+    db.exec('ALTER TABLE brands ADD COLUMN contact_phone TEXT');
   }
 
   // Migrate: add is_dev column to survey_responses (for existing DBs)
@@ -450,8 +488,8 @@ export function saveGameResult(result: GameResult): string {
   const insertGame = db.prepare(`
     INSERT INTO games (id, started_at, finished_at, mode, room_code, host_name, rounds, player_count,
       winner_name, winner_score, duration_seconds, status, live_status, has_error, is_dev,
-      api_version, client_version, settings_json, host_ip_hash, host_user_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      api_version, client_version, settings_json, host_ip_hash, host_user_id, brand_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertPlayer = db.prepare(`
@@ -466,7 +504,7 @@ export function saveGameResult(result: GameResult): string {
       r.duration_seconds ?? null, r.status, r.live_status,
       r.has_error ? 1 : 0, r.is_dev ? 1 : 0,
       r.api_version ?? null, r.client_version ?? null, r.settings_json ?? null,
-      r.host_ip_hash ?? null, r.host_user_id ?? null
+      r.host_ip_hash ?? null, r.host_user_id ?? null, validGameBrandId(r.brand_id)
     );
     for (const p of r.players) {
       insertPlayer.run(r.id, p.player_name, p.score, p.rank);
@@ -488,19 +526,20 @@ export interface LiveGameData {
   api_version?: string;
   host_ip_hash?: string;
   host_user_id?: string;
+  brand_id?: string | null;
 }
 
 export function createLiveGame(data: LiveGameData): string {
   db.prepare(`
     INSERT INTO games (id, started_at, finished_at, mode, room_code, host_name, rounds, player_count,
       winner_name, winner_score, duration_seconds, status, live_status, has_error, is_dev,
-      api_version, client_version, settings_json, host_ip_hash, host_user_id)
-    VALUES (?, ?, '', ?, ?, ?, 0, ?, '', 0, NULL, 'lobby', 'live', 0, ?, ?, NULL, NULL, ?, ?)
+      api_version, client_version, settings_json, host_ip_hash, host_user_id, brand_id)
+    VALUES (?, ?, '', ?, ?, ?, 0, ?, '', 0, NULL, 'lobby', 'live', 0, ?, ?, NULL, NULL, ?, ?, ?)
   `).run(
     data.id, data.started_at, data.mode, data.room_code ?? null,
     data.host_name ?? null, data.player_count,
     data.is_dev ? 1 : 0, data.api_version ?? null,
-    data.host_ip_hash ?? null, data.host_user_id ?? null
+    data.host_ip_hash ?? null, data.host_user_id ?? null, validGameBrandId(data.brand_id)
   );
   return data.id;
 }
@@ -516,6 +555,23 @@ export function updateLiveGame(id: string, updates: { playerCount?: number; stat
   if (sets.length === 0) return;
   params.push(id);
   db.prepare(`UPDATE games SET ${sets.join(', ')} WHERE id = ? AND live_status = 'live'`).run(...params);
+}
+
+/**
+ * Snapshot an in-progress (live) game's current roster into game_players so the
+ * player/users stats reflect ACTIVE games, not just completed ones. Replaces any
+ * existing rows for the game (idempotent); score/rank are placeholders until
+ * completeLiveGame writes the final results.
+ */
+export function syncLivePlayers(gameId: string, playerNames: string[]): void {
+  const names = playerNames.map((n) => (n ?? '').trim()).filter((n) => n.length > 0);
+  const del = db.prepare('DELETE FROM game_players WHERE game_id = ?');
+  const ins = db.prepare('INSERT INTO game_players (game_id, player_name, score, rank) VALUES (?, ?, 0, ?)');
+  const tx = db.transaction(() => {
+    del.run(gameId);
+    names.forEach((name, i) => ins.run(gameId, name, i + 1));
+  });
+  tx();
 }
 
 export interface CompleteLiveGameData {
@@ -548,6 +604,9 @@ export function completeLiveGame(id: string, data: CompleteLiveGameData): void {
     INSERT INTO game_players (game_id, player_name, score, rank)
     VALUES (?, ?, ?, ?)
   `);
+  // Clear any live-roster snapshot rows (from syncLivePlayers) so the final
+  // results replace them instead of duplicating players.
+  const deletePlayers = db.prepare('DELETE FROM game_players WHERE game_id = ?');
 
   const transaction = db.transaction(() => {
     updateGame.run(
@@ -557,6 +616,7 @@ export function completeLiveGame(id: string, data: CompleteLiveGameData): void {
       data.host_ip_hash ?? null, data.host_user_id ?? null,
       id
     );
+    deletePlayers.run(id);
     for (const p of data.players) {
       insertPlayer.run(id, p.player_name, p.score, p.rank);
     }
@@ -594,11 +654,12 @@ export interface GameFilters {
   hidePlayerCounts?: string[];
   playerName?: string;
   hostUserId?: string;
+  brandId?: string;
   orderBy?: GameOrderBy;
   orderDir?: GameOrderDir;
 }
 
-type FilterDim = 'date' | 'errors' | 'dev' | 'status' | 'groups' | 'raw' | 'duration' | 'players' | 'playerName' | 'hostUser';
+type FilterDim = 'date' | 'errors' | 'dev' | 'status' | 'groups' | 'raw' | 'duration' | 'players' | 'playerName' | 'hostUser' | 'brand';
 
 function durationBucketCondition(key: string): { sql: string; params: any[] } | null {
   if (key === 'unknown') return { sql: 'g.duration_seconds IS NULL', params: [] };
@@ -669,6 +730,13 @@ function buildConditions(filters: GameFilters, exclude: Set<FilterDim> = new Set
   if (!exclude.has('hostUser') && filters.hostUserId) {
     conditions.push('g.host_user_id = ?');
     params.push(filters.hostUserId);
+  }
+  // Brand-scoped: a game's brand is its PLAY attribution — the brand URL the
+  // game was created on (games.brand_id, set once at creation). Never added to
+  // any `exclude` set, so brand scope holds across every filter-count breakdown.
+  if (!exclude.has('brand') && filters.brandId) {
+    conditions.push('g.brand_id = ?');
+    params.push(filters.brandId);
   }
 
   const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
@@ -907,6 +975,17 @@ export function getGameById(id: string): GameDetail | null {
   return game;
 }
 
+// True iff game `gameId` belongs to brand `brandId` — i.e. it was created on
+// that brand's URL (games.brand_id play attribution), the same scoping the brand
+// stats viewers use. Lets the owner-gated single-game route reject games outside
+// the owner's brand without leaking their existence.
+export function gameBelongsToBrand(gameId: string, brandId: string): boolean {
+  const row = db.prepare(
+    `SELECT 1 FROM games WHERE id = ? AND brand_id = ? LIMIT 1`
+  ).get(gameId, brandId);
+  return !!row;
+}
+
 export function setGameDev(gameId: string, isDev: boolean): GameDetail | null {
   const result = db.prepare('UPDATE games SET is_dev = ? WHERE id = ?').run(isDev ? 1 : 0, gameId);
   if (result.changes === 0) return null;
@@ -1126,19 +1205,28 @@ export function getGameStateDurations(filters: GameFilters = {}): GameStateDurat
 
 export type UserStatsDevFilter = 'all' | 'dev' | 'nodev';
 
-export function getUserGameStats(opts: { devFilter?: UserStatsDevFilter; limit?: number } = {}): {
+export function getUserGameStats(opts: { devFilter?: UserStatsDevFilter; limit?: number; brandId?: string; includeAccounts?: boolean } = {}): {
   players: UserGameStat[];
   total_distinct: number;
   total_matched_users: number;
 } {
   const devFilter = opts.devFilter ?? 'nodev';
   const limit = Math.min(Math.max(opts.limit ?? 200, 1), 1000);
+  const brandId = opts.brandId;
+  // includeAccounts folds this brand's signed-up accounts INTO the player list
+  // (even ones that never played), so the brand admin's Users list replaces the
+  // old standalone "signed-up accounts" section. Only meaningful with a brandId.
+  const includeAccounts = !!opts.includeAccounts && !!brandId;
 
   let devClause = '';
   if (devFilter === 'nodev') devClause = 'AND g.is_dev = 0';
   else if (devFilter === 'dev') devClause = 'AND g.is_dev = 1';
+  // Player (PLAY-attribution) scope: appears in a game created on the brand URL.
+  const brandClause = brandId ? 'AND g.brand_id = ?' : '';
 
-  const sql = `
+  // Shared CTEs: game-player aggregation + one canonical account per name, plus
+  // a `keys` set = player names UNION (when includeAccounts) this brand's signups.
+  const ctes = `
     WITH player_agg AS (
       SELECT
         LOWER(TRIM(gp.player_name))            AS name_key,
@@ -1151,45 +1239,72 @@ export function getUserGameStats(opts: { devFilter?: UserStatsDevFilter; limit?:
         COUNT(DISTINCT g.host_user_id)         AS distinct_host_user_ids
       FROM game_players gp
       JOIN games g ON g.id = gp.game_id
-      WHERE 1=1 ${devClause}
+      WHERE 1=1 ${devClause} ${brandClause}
       GROUP BY LOWER(TRIM(gp.player_name))
     ),
-    user_match AS (
-      SELECT
-        LOWER(TRIM(display_name)) AS name_key,
-        id, display_name, email, avatar_url,
-        birth_month, birth_day, created_at,
-        ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(display_name)) ORDER BY created_at) AS rn
-      FROM users
-    )
+    acct1 AS (
+      SELECT name_key, id, display_name, email, avatar_url, birth_month, birth_day,
+             created_at, signup_brand_id, signup_brand_name, signup_brand_slug
+      FROM (
+        SELECT
+          LOWER(TRIM(u.display_name)) AS name_key,
+          u.id, u.display_name, u.email, u.avatar_url,
+          u.birth_month, u.birth_day, u.created_at,
+          u.brand_id AS signup_brand_id, b.name AS signup_brand_name, b.slug AS signup_brand_slug,
+          ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(u.display_name)) ORDER BY u.created_at) AS rn
+        FROM users u
+        LEFT JOIN brands b ON b.id = u.brand_id
+      ) WHERE rn = 1
+    ),
+    keys AS (
+      SELECT name_key FROM player_agg
+      ${includeAccounts
+        ? `UNION SELECT name_key FROM acct1 WHERE signup_brand_id = ? AND name_key NOT IN (SELECT name_key FROM player_agg)`
+        : ''}
+    )`;
+
+  const sql = `
+    ${ctes}
     SELECT
-      p.name_key, p.display_name, p.games_played, p.total_seconds,
+      k.name_key,
+      COALESCE(p.display_name, a.display_name)  AS display_name,
+      COALESCE(p.games_played, 0)               AS games_played,
+      COALESCE(p.total_seconds, 0)              AS total_seconds,
       p.first_game_at, p.last_game_at,
-      p.distinct_host_ips, p.distinct_host_user_ids,
-      u.id   AS matched_user_id,
-      u.email, u.avatar_url, u.birth_month, u.birth_day,
-      u.created_at AS matched_user_created_at
-    FROM player_agg p
-    LEFT JOIN user_match u ON u.name_key = p.name_key AND u.rn = 1
-    ORDER BY p.total_seconds DESC, p.games_played DESC
+      COALESCE(p.distinct_host_ips, 0)          AS distinct_host_ips,
+      COALESCE(p.distinct_host_user_ids, 0)     AS distinct_host_user_ids,
+      a.id   AS matched_user_id,
+      a.email, a.avatar_url, a.birth_month, a.birth_day,
+      a.created_at AS matched_user_created_at,
+      a.signup_brand_id, a.signup_brand_name, a.signup_brand_slug
+    FROM keys k
+    LEFT JOIN player_agg p ON p.name_key = k.name_key
+    LEFT JOIN acct1 a      ON a.name_key = k.name_key
+    ORDER BY COALESCE(p.total_seconds, 0) DESC, COALESCE(p.games_played, 0) DESC, display_name ASC
     LIMIT ?
   `;
+  const rowParams: any[] = [];
+  if (brandId) rowParams.push(brandId);          // player_agg brand scope
+  if (includeAccounts) rowParams.push(brandId);  // signup-inject scope
+  rowParams.push(limit);
+  const rows = db.prepare(sql).all(...rowParams) as UserGameStat[];
 
-  const rows = db.prepare(sql).all(limit) as UserGameStat[];
-
-  const totalRow = db.prepare(`
-    SELECT COUNT(DISTINCT LOWER(TRIM(gp.player_name))) AS total
-    FROM game_players gp
-    JOIN games g ON g.id = gp.game_id
-    WHERE 1=1 ${devClause}
-  `).get() as { total: number };
-
-  const matched = rows.reduce((n, r) => n + (r.matched_user_id ? 1 : 0), 0);
+  const countSql = `
+    ${ctes}
+    SELECT COUNT(*) AS total,
+           SUM(CASE WHEN a.id IS NOT NULL THEN 1 ELSE 0 END) AS matched
+    FROM keys k
+    LEFT JOIN acct1 a ON a.name_key = k.name_key
+  `;
+  const countParams: any[] = [];
+  if (brandId) countParams.push(brandId);
+  if (includeAccounts) countParams.push(brandId);
+  const totalRow = db.prepare(countSql).get(...countParams) as { total: number; matched: number };
 
   return {
     players: rows,
     total_distinct: totalRow.total ?? 0,
-    total_matched_users: matched,
+    total_matched_users: totalRow.matched ?? 0,
   };
 }
 
@@ -1223,11 +1338,21 @@ export function saveCardDraws(draws: CardDraw[]): void {
   transaction(draws);
 }
 
-export function getCardStats(devFilter: 'all' | 'dev' | 'nodev' = 'all'): { cards: CardStat[] } {
-  let devWherePlay = '';
-  let devWhereDraw = '';
-  if (devFilter === 'dev') { devWherePlay = 'WHERE g.is_dev = 1'; devWhereDraw = 'WHERE g2.is_dev = 1'; }
-  if (devFilter === 'nodev') { devWherePlay = 'WHERE g.is_dev = 0'; devWhereDraw = 'WHERE g2.is_dev = 0'; }
+export function getCardStats(devFilter: 'all' | 'dev' | 'nodev' = 'all', brandId?: string): { cards: CardStat[] } {
+  const playConds: string[] = [];
+  const drawConds: string[] = [];
+  const playParams: any[] = [];
+  const drawParams: any[] = [];
+  if (devFilter === 'dev')   { playConds.push('g.is_dev = 1'); drawConds.push('g2.is_dev = 1'); }
+  if (devFilter === 'nodev') { playConds.push('g.is_dev = 0'); drawConds.push('g2.is_dev = 0'); }
+  // Brand scope: a card play/draw's brand is its game's play attribution
+  // (games.brand_id — the brand URL the game was created on), mirroring the games filter.
+  if (brandId) {
+    playConds.push('g.brand_id = ?');  playParams.push(brandId);
+    drawConds.push('g2.brand_id = ?'); drawParams.push(brandId);
+  }
+  const devWherePlay = playConds.length ? 'WHERE ' + playConds.join(' AND ') : '';
+  const devWhereDraw = drawConds.length ? 'WHERE ' + drawConds.join(' AND ') : '';
 
   // Build draw counts
   const drawCounts = db.prepare(`
@@ -1236,7 +1361,7 @@ export function getCardStats(devFilter: 'all' | 'dev' | 'nodev' = 'all'): { card
     JOIN games g2 ON d.game_id = g2.id
     ${devWhereDraw}
     GROUP BY d.card_id, d.card_deck
-  `).all() as { card_id: string; card_deck: string; draw_count: number }[];
+  `).all(...drawParams) as { card_id: string; card_deck: string; draw_count: number }[];
 
   const drawMap = new Map<string, number>();
   for (const d of drawCounts) {
@@ -1252,7 +1377,7 @@ export function getCardStats(devFilter: 'all' | 'dev' | 'nodev' = 'all'): { card
     JOIN games g ON cp.game_id = g.id
     ${devWherePlay}
     GROUP BY cp.card_id, cp.card_deck
-  `).all() as (CardStat & { win_count: number })[];
+  `).all(...playParams) as (CardStat & { win_count: number })[];
 
   // Build lookup of played cards keyed by "deck:id"
   const playedMap = new Map<string, CardStat & { win_count: number }>();
@@ -1399,14 +1524,23 @@ export function saveSurveyResponse(r: SurveyResponse): boolean {
 
 export type SurveyDevFilter = 'all' | 'dev' | 'nodev';
 
-function devWhere(filter: SurveyDevFilter): string {
-  if (filter === 'dev') return 'WHERE is_dev = 1';
-  if (filter === 'nodev') return 'WHERE is_dev = 0';
-  return '';
+function surveyConditions(filter: SurveyDevFilter, brandId?: string): { where: string; params: any[] } {
+  const conds: string[] = [];
+  const params: any[] = [];
+  if (filter === 'dev') conds.push('is_dev = 1');
+  else if (filter === 'nodev') conds.push('is_dev = 0');
+  // Brand scope: a survey's brand is its game's play attribution
+  // (survey_responses.game_id → games.brand_id — the brand URL the game was created on).
+  // Surveys with a NULL game_id can't be attributed to a brand, so they're excluded.
+  if (brandId) {
+    conds.push('game_id IN (SELECT id FROM games WHERE brand_id = ?)');
+    params.push(brandId);
+  }
+  return { where: conds.length ? 'WHERE ' + conds.join(' AND ') : '', params };
 }
 
-export function getSurveyStats(devFilter: SurveyDevFilter = 'all'): SurveyStats {
-  const where = devWhere(devFilter);
+export function getSurveyStats(devFilter: SurveyDevFilter = 'all', brandId?: string): SurveyStats {
+  const { where, params } = surveyConditions(devFilter, brandId);
   const row = db.prepare(`
     SELECT
       COUNT(*) as count,
@@ -1417,7 +1551,7 @@ export function getSurveyStats(devFilter: SurveyDevFilter = 'all'): SurveyStats 
       SUM(CASE WHEN nps_score BETWEEN 7 AND 8 THEN 1 ELSE 0 END) as passives,
       SUM(CASE WHEN nps_score <= 6 THEN 1 ELSE 0 END) as detractors
     FROM survey_responses ${where}
-  `).get() as any;
+  `).get(...params) as any;
 
   const count = row.count as number;
   const promoters = row.promoters as number;
@@ -1438,13 +1572,13 @@ export function getSurveyStats(devFilter: SurveyDevFilter = 'all'): SurveyStats 
   };
 }
 
-export function getSurveyResponses(limit = 50, offset = 0, devFilter: SurveyDevFilter = 'all'): { responses: SurveyResponse[]; total: number } {
-  const where = devWhere(devFilter);
-  const total = (db.prepare(`SELECT COUNT(*) as c FROM survey_responses ${where}`).get() as { c: number }).c;
+export function getSurveyResponses(limit = 50, offset = 0, devFilter: SurveyDevFilter = 'all', brandId?: string): { responses: SurveyResponse[]; total: number } {
+  const { where, params } = surveyConditions(devFilter, brandId);
+  const total = (db.prepare(`SELECT COUNT(*) as c FROM survey_responses ${where}`).get(...params) as { c: number }).c;
   const responses = db.prepare(`
     SELECT id, created_at, game_id, player_name, session_id, nps_score, comment, improvement, client_version, is_dev
     FROM survey_responses ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?
-  `).all(limit, offset) as SurveyResponse[];
+  `).all(...params, limit, offset) as SurveyResponse[];
   return { responses, total };
 }
 

@@ -15,14 +15,43 @@ export function createBrand(data: {
   owner_user_id: string;
   logo_url?: string | null;
   status?: BrandStatus;
+  plan?: string | null;
+  contact_email?: string | null;
+  contact_phone?: string | null;
 }): Brand {
   const db = getDb();
   const id = `brand_${randomUUID()}`;
   db.prepare(`
-    INSERT INTO brands (id, slug, name, logo_url, owner_user_id, status)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, data.slug, data.name, data.logo_url ?? null, data.owner_user_id, data.status ?? 'pending');
+    INSERT INTO brands (id, slug, name, logo_url, owner_user_id, status, plan, contact_email, contact_phone)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id, data.slug, data.name, data.logo_url ?? null, data.owner_user_id,
+    data.status ?? 'pending', data.plan ?? null,
+    data.contact_email ?? null, data.contact_phone ?? null,
+  );
   return db.prepare('SELECT * FROM brands WHERE id = ?').get(id) as Brand;
+}
+
+/**
+ * Owner edit of a brand request. Updates only the provided columns (among
+ * name/slug/plan/contact_email/contact_phone/logo_url), bumps updated_at, and
+ * leaves `status` untouched. Returns the updated row (or null if id not found).
+ */
+export function updateBrand(
+  id: string,
+  fields: Partial<Pick<Brand, 'name' | 'slug' | 'plan' | 'contact_email' | 'contact_phone' | 'logo_url'>>,
+): Brand | null {
+  const db = getDb();
+  const allowed = ['name', 'slug', 'plan', 'contact_email', 'contact_phone', 'logo_url'] as const;
+  const cols = allowed.filter((c) => Object.prototype.hasOwnProperty.call(fields, c));
+  if (cols.length === 0) return getBrandById(id);
+  const setClause = cols.map((c) => `${c} = ?`).join(', ');
+  const values = cols.map((c) => (fields as Record<string, unknown>)[c] ?? null);
+  const info = db
+    .prepare(`UPDATE brands SET ${setClause}, updated_at = datetime('now') WHERE id = ?`)
+    .run(...values, id);
+  if (info.changes === 0) return null;
+  return getBrandById(id);
 }
 
 export function getBrandById(id: string): Brand | null {
@@ -104,4 +133,16 @@ export function setBrandLogo(id: string, logo_url: string): Brand | null {
   if (!getBrandById(id)) return null;
   db.prepare("UPDATE brands SET logo_url = ?, updated_at = datetime('now') WHERE id = ?").run(logo_url, id);
   return getBrandById(id);
+}
+
+/**
+ * Accounts attribution-tagged to a brand (users.brand_id), newest first.
+ * PII-limited — only id / display_name / created_at, never email or firebase_uid
+ * — for the owner-gated brand-admin "signed-up accounts" panel.
+ */
+export function listBrandUsers(brandId: string): Array<{ id: string; display_name: string; created_at: string }> {
+  const db = getDb();
+  return db.prepare(
+    'SELECT id, display_name, created_at FROM users WHERE brand_id = ? ORDER BY created_at DESC',
+  ).all(brandId) as Array<{ id: string; display_name: string; created_at: string }>;
 }

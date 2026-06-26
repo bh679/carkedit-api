@@ -13,6 +13,18 @@
 // set is the creation-time guard plus defence-in-depth for prefix-y words.
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/**
+ * Reserved-slug word lists live in reserved-slugs.json (single source of truth,
+ * also usable by other tooling). Read at load via fs so it works under plain
+ * `tsc` + Node ESM (no JSON import-attribute coupling); the file is copied to
+ * dist by the build step. Grouping is for readability only — everything is
+ * unioned into one exact-match set below.
+ */
+const RESERVED_DATA = JSON.parse(
+  fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'reserved-slugs.json'), 'utf8'),
+) as { prefixes: string[]; pages: string[]; brandWords: string[]; appWords: string[]; gameWords: string[] };
 
 /**
  * Display label for the partner-brand role. Change it HERE (and mirror in
@@ -29,28 +41,23 @@ export const SLUG_REGEX = /^[a-z0-9-]{2,40}$/;
  * Path prefixes a brand slug may never take — these are (or proxy to) real
  * server mounts / asset roots.
  */
-export const RESERVED_PREFIXES: readonly string[] = [
-  'api', 'uploads', '__', 'assets', 'css', 'js', 'scripts', 'mockups', 'docs',
-  'node_modules', 'tests', 'ports', 'data', 'dist',
-];
+/**
+ * Path prefixes a brand slug may never take — these are (or proxy to) real
+ * server mounts / asset roots. ('admin' is also the owner-panel second segment.)
+ */
+export const RESERVED_PREFIXES: readonly string[] = RESERVED_DATA.prefixes;
 
 /**
- * Standalone pages + app words that must never be claimable as a slug. Mirrors
- * carkedit-online/js/config/pages.js PAGES, plus root *.html files that are NOT
- * in PAGES (e.g. how-to-play), plus the new brand pages. buildReservedSlugs()
+ * Standalone pages + generic brand / organisation / app / game words that must
+ * never be claimable as a slug (see reserved-slugs.json). buildReservedSlugs()
  * additionally unions the live client dir's *.html basenames, so future pages
- * are covered without editing this list.
+ * are covered without editing the JSON.
  */
 export const RESERVED_PAGE_SLUGS: readonly string[] = [
-  // carkedit-online/js/config/pages.js PAGES
-  'index', 'admin-image-gen', 'admin-users', 'admin-roles', 'card-scale-test',
-  'card-test', 'color-demo', 'deploy', 'deploying', 'dev-dashboard', 'expansions',
-  'financial-dashboard', 'mockup-menu-layouts', 'stats', 'stats-games',
-  'stats-surveys', 'text-card-test',
-  // root *.html present as files but not in PAGES
-  'how-to-play',
-  // brand feature pages + reserved app words
-  'brand-admin', 'admin-brands', 'brand-signup', 'brands', 'account', 'menu', 'host', 'join',
+  ...RESERVED_DATA.pages,
+  ...RESERVED_DATA.brandWords,
+  ...RESERVED_DATA.appWords,
+  ...RESERVED_DATA.gameWords,
 ];
 
 /** The always-on reserved set, independent of any filesystem scan. */
