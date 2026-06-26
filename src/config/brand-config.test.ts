@@ -62,6 +62,18 @@ describe('reserved-slug guard', () => {
     }
   });
 
+  it('reserves generic brand / organisation words and their synonyms', () => {
+    for (const p of [
+      'brand', 'brands', 'branding', 'partner', 'partners', 'sponsor',
+      'evangelist', 'evangelists',
+      'organization', 'organizations', 'organisation', 'org', 'orgs',
+      'company', 'companies', 'business', 'agency', 'team', 'group', 'enterprise',
+      'foundation', 'charity', 'nonprofit', 'institution', 'association',
+    ]) {
+      expect(validateBrandSlug(p).ok).toBe(false);
+    }
+  });
+
   it('allows a normal, unreserved brand slug and returns the normalized value', () => {
     const result = validateBrandSlug('  Acme-Co ');
     expect(result.ok).toBe(true);

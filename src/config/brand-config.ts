@@ -54,6 +54,14 @@ export const RESERVED_PAGE_SLUGS: readonly string[] = [
   'how-to-play',
   // brand feature pages + reserved app words
   'brand-admin', 'admin-brands', 'brand-signup', 'brands', 'account', 'menu', 'host', 'join',
+  // generic brand / organisation words (+ synonyms) — too generic to claim as a
+  // vanity URL and likely to be confused with system/marketing pages.
+  'brand', 'branding', 'partner', 'partners', 'sponsor', 'sponsors',
+  'evangelist', 'evangelists',
+  'organization', 'organizations', 'organisation', 'organisations', 'org', 'orgs',
+  'company', 'companies', 'business', 'businesses', 'agency', 'agencies',
+  'team', 'teams', 'group', 'groups', 'enterprise', 'enterprises',
+  'foundation', 'charity', 'nonprofit', 'institution', 'association',
 ];
 
 /** The always-on reserved set, independent of any filesystem scan. */
