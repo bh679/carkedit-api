@@ -1,0 +1,64 @@
+{
+  "_comment": "Reserved brand vanity-URL slugs (single source of truth). Loaded by src/config/brand-config.ts and copied to dist on build. Grouped only for readability; at runtime every group is unioned into one exact-match set. The slug resolver also sits after express.static + /api routes, so real files/routes always win regardless of this list.",
+  "prefixes": [
+    "api", "uploads", "__", "assets", "css", "js", "scripts", "mockups", "docs",
+    "node_modules", "tests", "ports", "data", "dist", "admin"
+  ],
+  "pages": [
+    "index", "admin-image-gen", "admin-users", "admin-roles", "card-scale-test",
+    "card-test", "color-demo", "deploy", "deploying", "dev-dashboard", "expansions",
+    "financial-dashboard", "mockup-menu-layouts", "stats", "stats-games",
+    "stats-surveys", "text-card-test", "how-to-play",
+    "brand-admin", "admin-brands", "brand-signup", "evangelist-pricing",
+    "account", "menu", "host", "join"
+  ],
+  "brandWords": [
+    "brand", "brands", "branding", "partner", "partners", "sponsor", "sponsors",
+    "evangelist", "evangelists",
+    "organization", "organizations", "organisation", "organisations", "org", "orgs",
+    "company", "companies", "business", "businesses", "agency", "agencies",
+    "team", "teams", "group", "groups", "enterprise", "enterprises",
+    "foundation", "charity", "nonprofit", "institution", "association",
+    "corporation", "corp", "inc", "llc", "ltd", "co", "gmbh",
+    "society", "club", "clubs", "union", "guild", "guilds",
+    "network", "networks", "community", "communities", "collective",
+    "cooperative", "coop", "syndicate", "federation", "council", "committee",
+    "board", "ngo", "trust", "fund", "funds", "franchise",
+    "studio", "studios", "ventures", "holdings", "associates",
+    "consulting", "services", "solutions", "systems", "media", "press"
+  ],
+  "appWords": [
+    "id", "new", "restart", "home", "back", "next", "prev", "previous", "continue",
+    "reset", "help", "about", "settings", "setup", "profile", "dashboard",
+    "login", "logout", "signin", "signout", "signup", "register",
+    "contact", "contacts", "faq", "faqs", "terms", "privacy", "policy", "policies",
+    "legal", "cookies", "support", "status", "health", "sitemap", "robots", "favicon",
+    "search", "explore", "discover", "feed", "rss", "share", "invite", "invites",
+    "pricing", "plans", "plan", "features", "feature", "download", "downloads",
+    "app", "apps", "mobile", "web", "site", "website", "page", "pages",
+    "link", "links", "url", "redirect", "callback", "oauth", "auth", "sso", "token",
+    "verify", "confirm", "activate", "subscribe", "unsubscribe", "newsletter",
+    "email", "mail", "preferences", "notifications", "billing",
+    "payment", "payments", "checkout", "cart", "order", "orders", "invoice",
+    "subscription", "subscriptions", "upgrade", "trial", "demo",
+    "staging", "dev", "prod", "production", "beta", "alpha",
+    "public", "private", "internal", "system", "root", "default",
+    "www", "news", "blog", "shop", "store", "market", "marketplace"
+  ],
+  "gameWords": [
+    "game", "games", "play", "player", "players", "lobby", "room", "rooms",
+    "round", "rounds", "score", "scores", "scoreboard", "leaderboard",
+    "start", "pause", "resume", "quit", "exit", "spectate", "replay",
+    "rules", "deck", "decks", "card", "cards", "hand", "turn", "phase",
+    "eulogy", "die", "live", "bye", "wildcard",
+    "match", "matches", "multiplayer", "singleplayer", "pvp",
+    "level", "levels", "stage", "stages", "dice", "deal", "draw", "discard", "shuffle",
+    "bonus", "points", "point", "rank", "ranks", "ranking",
+    "tournament", "tournaments", "bracket", "season", "seasons", "event", "events",
+    "quest", "mission", "achievement", "achievements", "badge", "badges",
+    "avatar", "avatars", "character", "characters", "party",
+    "spectator", "spectators", "ready", "vote", "votes", "voting",
+    "kick", "ban", "mute", "chat", "emote",
+    "win", "lose", "tie", "victory", "defeat", "gameover", "respawn", "spawn"
+  ]
+}

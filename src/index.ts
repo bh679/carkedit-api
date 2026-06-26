@@ -12,7 +12,7 @@ import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
 import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameFilterCounts, getGameById, getStats, getStatsByPeriod, getGamesStats, getGameStateDurations, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev, saveMailingListEntry, getUserGameStats, gameBelongsToBrand } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, setAdminFlag, setUserRole } from "./db/users.js";
-import { createBrand, getBrandBySlug, getApprovedBrandBySlug, listBrandsByOwner, listBrandsWithOwner, listBrandUsers, getSlugAvailability, setBrandStatus } from "./db/brands.js";
+import { createBrand, updateBrand, getBrandById, getBrandBySlug, getApprovedBrandBySlug, listBrandsByOwner, listBrandsWithOwner, listBrandUsers, getSlugAvailability, setBrandStatus } from "./db/brands.js";
 import { validateBrandSlug, buildReservedSlugs, ROLE_LABELS } from "./config/brand-config.js";
 import type { BrandStatus } from "./db/types.js";
 import { listPagePermissions, setPagePermission } from "./db/page-permissions.js";
@@ -1063,6 +1063,17 @@ const server = defineServer({
           if (req.file) fs.unlink(req.file.path, () => {});
           return res.status(409).json({ error: "That URL is already taken" });
         }
+        // Optional plan tier chosen on the pricing page; attribution only (never
+        // gates access). Unknown/absent values are stored as null, not rejected.
+        const ALLOWED_PLANS = ['basic', 'pro', 'ultimate'];
+        const rawPlan = typeof req.body?.plan === 'string' ? req.body.plan.trim().toLowerCase() : '';
+        const plan = ALLOWED_PLANS.includes(rawPlan) ? rawPlan : null;
+        // Contact details captured at signup (attribution/contact only). Stored as
+        // null when absent or implausible; bounded to keep the row sane.
+        const rawEmail = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
+        const contact_email = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail) && rawEmail.length <= 160 ? rawEmail : null;
+        const rawPhone = typeof req.body?.phone === 'string' ? req.body.phone.trim() : '';
+        const contact_phone = rawPhone && rawPhone.length <= 40 ? rawPhone : null;
         const logo_url = req.file ? `/uploads/brands/${req.file.filename}` : null;
         const brand = createBrand({
           slug: slugCheck.slug,
@@ -1070,6 +1081,9 @@ const server = defineServer({
           owner_user_id: req.localUser!.id,
           logo_url,
           status: 'pending',
+          plan,
+          contact_email,
+          contact_phone,
         });
         res.status(201).json(brand);
 
@@ -1093,6 +1107,51 @@ const server = defineServer({
       }
     }, (err: any, _req: any, res: any, _next: any) => {
       // Multer error handler (size limit / fileFilter reject).
+      res.status(400).json({ error: err?.message || "Invalid upload" });
+    });
+
+    // Owner (or admin): edit a brand request's details. Sub-path keeps it distinct
+    // from the admin status PATCH below. Status is NOT changed here.
+    app.patch("/api/carkedit/brands/:id/details", requireBrandOwner(), brandLogoUpload.single('logo'), (req: any, res: any) => {
+      try {
+        const current = getBrandById(req.params.id);
+        if (!current) {
+          if (req.file) fs.unlink(req.file.path, () => {});
+          return res.status(404).json({ error: "Brand not found" });
+        }
+        const rawName = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+        if (!rawName || rawName.length > 80) {
+          if (req.file) fs.unlink(req.file.path, () => {});
+          return res.status(400).json({ error: "name is required (max 80 chars)" });
+        }
+        const slugCheck = validateBrandSlug(req.body?.slug ?? '', reservedSlugs);
+        if (!slugCheck.ok) {
+          if (req.file) fs.unlink(req.file.path, () => {});
+          return res.status(400).json({ error: slugCheck.error });
+        }
+        // Uniqueness only matters if the slug actually changed.
+        if (slugCheck.slug !== current.slug && getBrandBySlug(slugCheck.slug)) {
+          if (req.file) fs.unlink(req.file.path, () => {});
+          return res.status(409).json({ error: "That URL is already taken" });
+        }
+        const ALLOWED_PLANS = ['basic', 'pro', 'ultimate'];
+        const rawPlan = typeof req.body?.plan === 'string' ? req.body.plan.trim().toLowerCase() : '';
+        const plan = ALLOWED_PLANS.includes(rawPlan) ? rawPlan : null;
+        const rawEmail = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
+        const contact_email = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail) && rawEmail.length <= 160 ? rawEmail : null;
+        const rawPhone = typeof req.body?.phone === 'string' ? req.body.phone.trim() : '';
+        const contact_phone = rawPhone && rawPhone.length <= 40 ? rawPhone : null;
+        const fields: any = { name: rawName, slug: slugCheck.slug, plan, contact_email, contact_phone };
+        // Replace the logo only when a new one is uploaded.
+        if (req.file) fields.logo_url = `/uploads/brands/${req.file.filename}`;
+        const brand = updateBrand(req.params.id, fields);
+        if (!brand) return res.status(404).json({ error: "Brand not found" });
+        res.json(brand);
+      } catch (err) {
+        console.error("[CarkedIt API] Edit brand error:", err);
+        res.status(500).json({ error: "Failed to update brand" });
+      }
+    }, (err: any, _req: any, res: any, _next: any) => {
       res.status(400).json({ error: err?.message || "Invalid upload" });
     });
 

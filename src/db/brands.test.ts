@@ -2,6 +2,7 @@ import { initDatabase } from './database.js';
 import { createUser } from './users.js';
 import {
   createBrand,
+  updateBrand,
   getBrandBySlug,
   getApprovedBrandBySlug,
   listBrands,
@@ -32,6 +33,68 @@ describe('brands data access', () => {
     expect(getBrandBySlug('acme')?.id).toBe(brand.id);
     // Pending brands must NOT resolve as approved (slug stays dark until review).
     expect(getApprovedBrandBySlug('acme')).toBeNull();
+  });
+
+  it('stores the chosen plan and defaults it to null', () => {
+    const owner = makeOwner();
+    const pro = createBrand({ slug: 'pro-co', name: 'Pro Co', owner_user_id: owner.id, plan: 'pro' });
+    expect(pro.plan).toBe('pro');
+    expect(getBrandBySlug('pro-co')?.plan).toBe('pro');
+
+    // Omitted plan persists as null (e.g. signups not coming from the pricing page).
+    const none = createBrand({ slug: 'none-co', name: 'None Co', owner_user_id: owner.id });
+    expect(none.plan).toBeNull();
+  });
+
+  it('stores contact email + phone, defaulting to null when omitted', () => {
+    const owner = makeOwner();
+    const withContact = createBrand({
+      slug: 'contact-co', name: 'Contact Co', owner_user_id: owner.id,
+      contact_email: 'owner@example.com', contact_phone: '+61 400 000 000',
+    });
+    expect(withContact.contact_email).toBe('owner@example.com');
+    expect(withContact.contact_phone).toBe('+61 400 000 000');
+    const stored = getBrandBySlug('contact-co');
+    expect(stored?.contact_email).toBe('owner@example.com');
+    expect(stored?.contact_phone).toBe('+61 400 000 000');
+
+    const none = createBrand({ slug: 'plain-co', name: 'Plain Co', owner_user_id: owner.id });
+    expect(none.contact_email).toBeNull();
+    expect(none.contact_phone).toBeNull();
+  });
+
+  it('updateBrand edits provided fields and leaves status untouched', () => {
+    const owner = makeOwner();
+    const b = createBrand({
+      slug: 'edit-co', name: 'Edit Co', owner_user_id: owner.id, status: 'approved', plan: 'basic',
+      contact_email: 'a@example.com', contact_phone: '111',
+    });
+    const updated = updateBrand(b.id, {
+      name: 'Edited Co', slug: 'edited-co', plan: 'pro',
+      contact_email: 'b@example.com', contact_phone: '222',
+    });
+    expect(updated?.name).toBe('Edited Co');
+    expect(updated?.slug).toBe('edited-co');
+    expect(updated?.plan).toBe('pro');
+    expect(updated?.contact_email).toBe('b@example.com');
+    expect(updated?.contact_phone).toBe('222');
+    // Status is preserved across an owner edit.
+    expect(updated?.status).toBe('approved');
+    // Persisted under the new slug.
+    expect(getBrandBySlug('edited-co')?.id).toBe(b.id);
+  });
+
+  it('updateBrand only touches the columns provided', () => {
+    const owner = makeOwner();
+    const b = createBrand({ slug: 'partial-co', name: 'Partial Co', owner_user_id: owner.id, plan: 'ultimate' });
+    const updated = updateBrand(b.id, { contact_phone: '999' });
+    expect(updated?.contact_phone).toBe('999');
+    expect(updated?.name).toBe('Partial Co'); // untouched
+    expect(updated?.plan).toBe('ultimate');   // untouched
+  });
+
+  it('updateBrand returns null for an unknown id', () => {
+    expect(updateBrand('brand_missing', { name: 'x' })).toBeNull();
   });
 
   it('only resolves a slug once approved', () => {
