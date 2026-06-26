@@ -174,6 +174,8 @@ export function initDatabase(dbPath: string = DB_PATH): void {
       owner_user_id TEXT NOT NULL REFERENCES users(id),
       status TEXT NOT NULL DEFAULT 'pending',
       plan TEXT,
+      contact_email TEXT,
+      contact_phone TEXT,
       theme_json TEXT,
       custom_domain TEXT UNIQUE,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -370,6 +372,13 @@ export function initDatabase(dbPath: string = DB_PATH): void {
   const brandCols = db.prepare("PRAGMA table_info(brands)").all().map((c: any) => c.name);
   if (brandCols.length > 0 && !brandCols.includes('plan')) {
     db.exec('ALTER TABLE brands ADD COLUMN plan TEXT');
+  }
+  // Contact details captured at signup so an admin can reach the requester.
+  if (brandCols.length > 0 && !brandCols.includes('contact_email')) {
+    db.exec('ALTER TABLE brands ADD COLUMN contact_email TEXT');
+  }
+  if (brandCols.length > 0 && !brandCols.includes('contact_phone')) {
+    db.exec('ALTER TABLE brands ADD COLUMN contact_phone TEXT');
   }
 
   // Migrate: add is_dev column to survey_responses (for existing DBs)

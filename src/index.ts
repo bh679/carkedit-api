@@ -1068,6 +1068,12 @@ const server = defineServer({
         const ALLOWED_PLANS = ['basic', 'pro', 'ultimate'];
         const rawPlan = typeof req.body?.plan === 'string' ? req.body.plan.trim().toLowerCase() : '';
         const plan = ALLOWED_PLANS.includes(rawPlan) ? rawPlan : null;
+        // Contact details captured at signup (attribution/contact only). Stored as
+        // null when absent or implausible; bounded to keep the row sane.
+        const rawEmail = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
+        const contact_email = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail) && rawEmail.length <= 160 ? rawEmail : null;
+        const rawPhone = typeof req.body?.phone === 'string' ? req.body.phone.trim() : '';
+        const contact_phone = rawPhone && rawPhone.length <= 40 ? rawPhone : null;
         const logo_url = req.file ? `/uploads/brands/${req.file.filename}` : null;
         const brand = createBrand({
           slug: slugCheck.slug,
@@ -1076,6 +1082,8 @@ const server = defineServer({
           logo_url,
           status: 'pending',
           plan,
+          contact_email,
+          contact_phone,
         });
         res.status(201).json(brand);
 

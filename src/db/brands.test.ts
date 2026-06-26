@@ -45,6 +45,23 @@ describe('brands data access', () => {
     expect(none.plan).toBeNull();
   });
 
+  it('stores contact email + phone, defaulting to null when omitted', () => {
+    const owner = makeOwner();
+    const withContact = createBrand({
+      slug: 'contact-co', name: 'Contact Co', owner_user_id: owner.id,
+      contact_email: 'owner@example.com', contact_phone: '+61 400 000 000',
+    });
+    expect(withContact.contact_email).toBe('owner@example.com');
+    expect(withContact.contact_phone).toBe('+61 400 000 000');
+    const stored = getBrandBySlug('contact-co');
+    expect(stored?.contact_email).toBe('owner@example.com');
+    expect(stored?.contact_phone).toBe('+61 400 000 000');
+
+    const none = createBrand({ slug: 'plain-co', name: 'Plain Co', owner_user_id: owner.id });
+    expect(none.contact_email).toBeNull();
+    expect(none.contact_phone).toBeNull();
+  });
+
   it('only resolves a slug once approved', () => {
     const owner = makeOwner();
     const brand = createBrand({ slug: 'acme', name: 'Acme', owner_user_id: owner.id });
