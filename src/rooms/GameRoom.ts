@@ -11,7 +11,7 @@ import { handleSubmitCard, handleSwapCard, handleRevealComplete, handleRevealSub
 import { handleStartEulogyRound, handleSelectEulogist, handleConfirmEulogists, handleDoneEulogy, handlePickBestEulogy, handleNextWildcard, handleRevealWinner } from "../phases/EulogyPhase.js";
 import { ROOM_CODE_WORDS } from "./roomWords.js";
 import { verifyHostAuthorization } from "./hostAuth.js";
-import { saveGameResult, saveCardPlays, saveCardDraws, saveGameEvent, backfillGameId, createLiveGame, updateLiveGame, completeLiveGame, abandonGame } from "../db/database.js";
+import { saveGameResult, saveCardPlays, saveCardDraws, saveGameEvent, backfillGameId, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, syncLivePlayers } from "../db/database.js";
 import type { GameResult, CardPlay, CardDraw, GameEvent } from "../db/types.js";
 import { postWebhookEmbed, buildGameStartEmbed, buildGameFinishEmbed } from "../services/discord/webhook.js";
 import fs from "fs";
@@ -98,6 +98,7 @@ export class GameRoom extends Room<{ state: GameState }> {
         player_count: 0,
         is_dev: this.state.devMode,
         api_version: apiPkg.version,
+        brand_id: options?.brandId,  // play attribution (brand URL host created on); validated in createLiveGame
       });
       console.log(`[GameRoom] Live game created in DB: ${this._gameId}`);
     } catch (err) {
@@ -121,6 +122,7 @@ export class GameRoom extends Room<{ state: GameState }> {
         const oldName = player.name;
         player.name = data.name;
         this.logEvent(client, "name_changed", { oldName, newName: data.name });
+        this.persistLivePlayers();
       }
     });
 
@@ -321,6 +323,22 @@ export class GameRoom extends Room<{ state: GameState }> {
     console.log(`[GameRoom] Room created`);
   }
 
+  /**
+   * Snapshot the current roster into game_players so the player/users stats
+   * (incl. the brand admin panel) reflect this LIVE game, not only completed
+   * ones. Best-effort: never throws into the game loop.
+   */
+  private persistLivePlayers(): void {
+    if (!this._gameId) return;
+    try {
+      const names: string[] = [];
+      this.state.players.forEach((p) => { if (p?.name) names.push(p.name); });
+      syncLivePlayers(this._gameId, names);
+    } catch (err) {
+      console.error('[GameRoom] persistLivePlayers failed:', err);
+    }
+  }
+
   onJoin(client: Client, options: any) {
     const player = new Player();
     player.sessionId = client.sessionId;
@@ -377,6 +395,8 @@ export class GameRoom extends Room<{ state: GameState }> {
         });
       } catch {}
     }
+    // Reflect the new roster in player stats while the game is still live.
+    this.persistLivePlayers();
 
     console.log(`[GameRoom] ${player.name} joined (${client.sessionId})`);
   }
@@ -395,6 +415,7 @@ export class GameRoom extends Room<{ state: GameState }> {
 
     if (this.state.phase === "lobby") {
       this.state.players.delete(client.sessionId);
+      this.persistLivePlayers();
       return;
     }
 

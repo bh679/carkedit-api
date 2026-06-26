@@ -29,6 +29,7 @@ export interface DiscordEmbed {
 export const COLOR_GAME_START = 0x10b981;
 export const COLOR_GAME_FINISH = 0x6366f1;
 export const COLOR_ACCOUNT_CREATED = 0xf59e0b;
+export const COLOR_BRAND_REQUEST = 0x8b5cf6;
 
 const DISCORD_TIMEOUT_MS = 5000;
 
@@ -39,6 +40,10 @@ export interface PostOptions {
   fetchImpl?: typeof fetch;
   /** Test seam — inject a stub logger. Defaults to `console`. */
   logger?: Pick<Console, "warn" | "debug">;
+  /** Optional message text sent with the embed — e.g. a "<@id>" mention. */
+  content?: string;
+  /** User ids permitted to be pinged by `content` (Discord allowed_mentions). */
+  allowedMentionUserIds?: string[];
 }
 
 /**
@@ -68,7 +73,11 @@ export async function postWebhookEmbed(
     const res = await fetchImpl(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ embeds: [embed] }),
+      body: JSON.stringify({
+        ...(opts.content ? { content: opts.content } : {}),
+        embeds: [embed],
+        ...(opts.allowedMentionUserIds ? { allowed_mentions: { users: opts.allowedMentionUserIds } } : {}),
+      }),
       signal: controller.signal,
     });
     if (!res.ok) {
@@ -112,6 +121,28 @@ export function buildGameStartEmbed(opts: GameStartEmbedOpts): DiscordEmbed {
     title: "Game started",
     color: COLOR_GAME_START,
     fields,
+    timestamp: new Date().toISOString(),
+    footer: { text: `carkedit-api v${opts.apiVersion}` },
+  };
+}
+
+export interface BrandRequestEmbedOpts {
+  brandName: string;
+  slug: string;
+  requesterName?: string | null;
+  apiVersion: string;
+}
+
+/** Embed for a new partner-brand ("Evangelist") request awaiting admin review. */
+export function buildBrandRequestEmbed(opts: BrandRequestEmbedOpts): DiscordEmbed {
+  return {
+    title: "New brand request",
+    description: `**${truncate(opts.brandName, 80)}** requested \`carkedit.com/${opts.slug}\` — pending review`,
+    color: COLOR_BRAND_REQUEST,
+    fields: [
+      { name: "Requested by", value: truncate(opts.requesterName || "(no name)", 64), inline: true },
+      { name: "Slug", value: opts.slug, inline: true },
+    ],
     timestamp: new Date().toISOString(),
     footer: { text: `carkedit-api v${opts.apiVersion}` },
   };

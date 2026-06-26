@@ -7,6 +7,7 @@ import {
   listBrands,
   listBrandsByOwner,
   listBrandsWithOwner,
+  listBrandUsers,
   getSlugAvailability,
   setBrandStatus,
   setBrandLogo,
@@ -62,6 +63,27 @@ describe('brands data access', () => {
 
     const withLogo = setBrandLogo(approved.id, '/uploads/brands/a.png');
     expect(withLogo?.logo_url).toBe('/uploads/brands/a.png');
+  });
+
+  it('lists only brand-tagged users, newest first, PII-limited', () => {
+    const owner = makeOwner();
+    const brand = createBrand({ slug: 'acme', name: 'Acme', owner_user_id: owner.id, status: 'approved' });
+    const other = createBrand({ slug: 'other', name: 'Other', owner_user_id: owner.id, status: 'approved' });
+
+    const u1 = createUser({ display_name: 'First', firebase_uid: 'uid_1', email: 'one@example.com', brand_id: brand.id });
+    const u2 = createUser({ display_name: 'Second', firebase_uid: 'uid_2', email: 'two@example.com', brand_id: brand.id });
+    createUser({ display_name: 'Outsider', firebase_uid: 'uid_3', email: 'three@example.com' }); // no brand
+    createUser({ display_name: 'OtherBrand', firebase_uid: 'uid_4', email: 'four@example.com', brand_id: other.id });
+
+    const members = listBrandUsers(brand.id);
+    // Only the two acme-tagged accounts (owner row itself has no brand_id).
+    expect(members.map((m) => m.id).sort()).toEqual([u1.id, u2.id].sort());
+    // Newest first (created_at DESC; ties resolve by insertion, so u2 ≥ u1).
+    expect(new Date(members[0].created_at).getTime()).toBeGreaterThanOrEqual(
+      new Date(members[1].created_at).getTime(),
+    );
+    // PII-limited shape — no email / firebase_uid leaked.
+    expect(Object.keys(members[0]).sort()).toEqual(['created_at', 'display_name', 'id']);
   });
 
   describe('listBrandsWithOwner', () => {

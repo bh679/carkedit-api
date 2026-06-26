@@ -10,16 +10,16 @@ import multer from "multer";
 import helmet from "helmet";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
-import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameFilterCounts, getGameById, getStats, getStatsByPeriod, getGamesStats, getGameStateDurations, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev, saveMailingListEntry, getUserGameStats } from "./db/database.js";
+import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameFilterCounts, getGameById, getStats, getStatsByPeriod, getGamesStats, getGameStateDurations, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev, saveMailingListEntry, getUserGameStats, gameBelongsToBrand } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, setAdminFlag, setUserRole } from "./db/users.js";
-import { createBrand, getBrandBySlug, getApprovedBrandBySlug, listBrandsByOwner, listBrandsWithOwner, getSlugAvailability, setBrandStatus } from "./db/brands.js";
-import { validateBrandSlug, buildReservedSlugs } from "./config/brand-config.js";
+import { createBrand, getBrandBySlug, getApprovedBrandBySlug, listBrandsByOwner, listBrandsWithOwner, listBrandUsers, getSlugAvailability, setBrandStatus } from "./db/brands.js";
+import { validateBrandSlug, buildReservedSlugs, ROLE_LABELS } from "./config/brand-config.js";
 import type { BrandStatus } from "./db/types.js";
 import { listPagePermissions, setPagePermission } from "./db/page-permissions.js";
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, setPackBaseCost, getPackStats, listPackStatsAll } from "./db/packs.js";
 import { createGenerationLog, listGenerationLog, mergeLogEntries } from "./db/generation-log.js";
 import { createCostEntry, getCostByEnvironment } from "./db/cost-entries.js";
-import { optionalAuth, requireAuth, requireAdmin, requireQA, setFirebaseAvailable, isFirebaseAvailable } from "./middleware/auth.js";
+import { optionalAuth, requireAuth, requireAdmin, requireQA, requireBrandOwner, setFirebaseAvailable, isFirebaseAvailable } from "./middleware/auth.js";
 import { isRole } from "./auth/roles.js";
 import { publicWriteLimiter, publicBodyLimit } from "./middleware/rate-limit.js";
 import { attachRequestId, requestLogger } from "./middleware/request-logger.js";
@@ -29,10 +29,16 @@ import { DEFAULT_STYLE } from "./services/image-gen/default-style.js";
 import githubProxyRouter from "./routes/github-proxy.js";
 import adminDeployTokenRouter from "./routes/admin-deploy-token.js";
 import { validateOptionalString, validateEnum, coerceWinner, coerceGamePlayer } from "./utils/validation.js";
-import { postWebhookEmbed, buildGameFinishEmbed } from "./services/discord/webhook.js";
+import { postWebhookEmbed, buildGameFinishEmbed, buildBrandRequestEmbed } from "./services/discord/webhook.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "4500", 10);
+// Discord user pinged to review new partner-brand requests (Brennan).
+const ADMIN_DISCORD_USER_ID = process.env.ADMIN_DISCORD_USER_ID || "342110421114945537";
+const apiVersion: string = (() => {
+  try { return JSON.parse(fs.readFileSync(path.join(__dirname, "../package.json"), "utf-8")).version; }
+  catch { return "0.0.0"; }
+})();
 const clientDir = process.env.CLIENT_DIR || path.join(__dirname, "../../carkedit-client");
 
 // Initialize Firebase Admin SDK. The project_id from the service-account
@@ -355,7 +361,7 @@ const server = defineServer({
     // Game history endpoints
     app.post("/api/carkedit/games", publicWriteLimiter, publicBodyLimit, optionalAuth(), (req: any, res: any) => {
       try {
-        const { mode, rounds, players, settings, finishedAt, startedAt, hostName, status, clientVersion, isDev } = req.body;
+        const { mode, rounds, players, settings, finishedAt, startedAt, hostName, status, clientVersion, isDev, brandId } = req.body;
         if (!players || !Array.isArray(players) || players.length === 0) {
           return res.status(400).json({ error: "players array is required" });
         }
@@ -388,6 +394,7 @@ const server = defineServer({
           settings_json: settings ? JSON.stringify(settings) : undefined,
           host_ip_hash: hashIp(req.ip) ?? undefined,
           host_user_id: req.localUser?.id ?? undefined,
+          brand_id: brandId,  // play attribution (brand URL the game was created on); validated in saveGameResult
           players: sorted.map((p: any, i: number) => coerceGamePlayer(p, i + 1)),
         };
 
@@ -490,6 +497,7 @@ const server = defineServer({
       hideDurationBuckets: parseCsv(q.hideDurationBuckets),
       hidePlayerCounts: parseCsv(q.hidePlayerCounts),
       playerName: (typeof q.playerName === 'string' && q.playerName.trim().length > 0) ? q.playerName : undefined,
+      brandId: (typeof q.brandId === 'string' && q.brandId) ? q.brandId : undefined,
       orderBy: (['recency', 'duration'].includes(q.orderBy) ? q.orderBy : 'recency') as any,
       orderDir: (['asc', 'desc'].includes(q.orderDir) ? q.orderDir : 'desc') as any,
     });
@@ -793,14 +801,16 @@ const server = defineServer({
 
     app.post("/api/carkedit/users", requireAuth(), (req: any, res: any) => {
       try {
-        const { display_name, avatar_url, birth_month, birth_day } = req.body;
+        const { display_name, avatar_url, birth_month, birth_day, brand_id } = req.body;
         const firebase_uid = req.firebaseUser!.uid;
         const email = req.body.email || req.firebaseUser!.email;
         // display_name is optional — a new account may be nameless until the
         // player provides a name when creating a room. An empty value never
-        // overwrites an existing name (createUser uses NULLIF).
+        // overwrites an existing name (createUser uses NULLIF). brand_id is the
+        // partner-brand attribution tag (validated + written only at creation;
+        // the auth middleware already applied it when this is a new account).
         const name = typeof display_name === 'string' ? display_name.trim() : '';
-        const user = createUser({ display_name: name, firebase_uid, email, avatar_url, birth_month, birth_day });
+        const user = createUser({ display_name: name, firebase_uid, email, avatar_url, birth_month, birth_day, brand_id });
         res.status(201).json(user);
       } catch (err) {
         console.error("[CarkedIt API] Create user error:", err);
@@ -836,6 +846,12 @@ const server = defineServer({
         console.error("[CarkedIt API] Update user error:", err);
         res.status(500).json({ error: "Failed to update user" });
       }
+    });
+
+    // Public: the configurable role display labels. Single source of truth so
+    // the client doesn't drift from the API's ROLE_LABELS (brand-config.ts).
+    app.get("/api/carkedit/config/labels", (_req: any, res: any) => {
+      res.json({ roleLabels: ROLE_LABELS });
     });
 
     // ── Partner brands ("Evangelist") ─────────────────────────────────────
@@ -896,6 +912,138 @@ const server = defineServer({
       }
     });
 
+    // Owner-gated: brand-scoped game stats. Brand is DERIVED from the
+    // server-verified host (games.host_user_id → users.brand_id), so the numbers
+    // are non-spoofable. Reuses getGamesStats/getRecentGames — no new aggregation.
+    // Registered AFTER the literal /brands/mine + /brands/slug-available routes so
+    // the param ":id" never shadows them.
+    app.get("/api/carkedit/brands/:id/stats", requireBrandOwner(), (req: any, res: any) => {
+      try {
+        res.json({
+          stats: getGamesStats({ brandId: req.params.id }),
+          recentGames: getRecentGames({ brandId: req.params.id, limit: 10 }).games,
+        });
+      } catch (err) {
+        console.error("[CarkedIt API] Brand stats error:", err);
+        res.status(500).json({ error: "Failed to retrieve brand stats" });
+      }
+    });
+
+    // Owner-gated: accounts attribution-tagged to this brand (PII-limited).
+    app.get("/api/carkedit/brands/:id/users", requireBrandOwner(), (req: any, res: any) => {
+      try {
+        res.json({ users: listBrandUsers(req.params.id) });
+      } catch (err) {
+        console.error("[CarkedIt API] Brand users error:", err);
+        res.status(500).json({ error: "Failed to retrieve brand users" });
+      }
+    });
+
+    // ── Owner-gated brand-scoped stats viewers ────────────────────────────
+    // Each mirrors a global /api/carkedit/<domain> endpoint but is gated by
+    // requireBrandOwner (brand owners are Host-tier, NOT QA) and forces the
+    // brand scope to req.params.id. They reuse the SAME aggregation functions
+    // as the global Stats page — change one, change both.
+    const brandDevFilter = (q: any): 'all' | 'dev' | 'nodev' =>
+      (['all', 'dev', 'nodev'].includes(q.dev) ? q.dev : 'all');
+
+    app.get("/api/carkedit/brands/:id/games", requireBrandOwner(), (req: any, res: any) => {
+      try {
+        res.json(getRecentGames({ ...buildGameFiltersFromQuery(req.query), brandId: req.params.id }));
+      } catch (err) {
+        console.error("[CarkedIt API] Brand games error:", err);
+        res.status(500).json({ error: "Failed to retrieve brand games" });
+      }
+    });
+
+    app.get("/api/carkedit/brands/:id/games/stats", requireBrandOwner(), (req: any, res: any) => {
+      try {
+        res.json(getGamesStats({ ...buildGameFiltersFromQuery(req.query), brandId: req.params.id }));
+      } catch (err) {
+        console.error("[CarkedIt API] Brand game stats error:", err);
+        res.status(500).json({ error: "Failed to retrieve brand game stats" });
+      }
+    });
+
+    app.get("/api/carkedit/brands/:id/games/filter-counts", requireBrandOwner(), (req: any, res: any) => {
+      try {
+        res.json(getGameFilterCounts({ ...buildGameFiltersFromQuery(req.query), brandId: req.params.id }));
+      } catch (err) {
+        console.error("[CarkedIt API] Brand filter counts error:", err);
+        res.status(500).json({ error: "Failed to retrieve brand filter counts" });
+      }
+    });
+
+    // Single-game detail, brand-scoped. Mirrors the global GET /games/:id but
+    // gated by requireBrandOwner AND restricted to games hosted by the brand
+    // (getGameById has no brand filter). Registered AFTER /games/stats and
+    // /games/filter-counts so ':gameId' can't shadow those literal segments.
+    // Out-of-brand or missing games both return 404 (don't leak existence).
+    app.get("/api/carkedit/brands/:id/games/:gameId", requireBrandOwner(), (req: any, res: any) => {
+      try {
+        const game = getGameById(req.params.gameId);
+        if (!game || !gameBelongsToBrand(req.params.gameId, req.params.id)) {
+          return res.status(404).json({ error: "Game not found" });
+        }
+        res.json(game);
+      } catch (err) {
+        console.error("[CarkedIt API] Brand game detail error:", err);
+        res.status(500).json({ error: "Failed to retrieve brand game" });
+      }
+    });
+
+    app.get("/api/carkedit/brands/:id/cards/stats", requireBrandOwner(), (req: any, res: any) => {
+      try {
+        res.json(getCardStats(brandDevFilter(req.query), req.params.id));
+      } catch (err) {
+        console.error("[CarkedIt API] Brand card stats error:", err);
+        res.status(500).json({ error: "Failed to retrieve brand card stats" });
+      }
+    });
+
+    app.get("/api/carkedit/brands/:id/surveys/stats", requireBrandOwner(), (req: any, res: any) => {
+      try {
+        res.json(getSurveyStats(brandDevFilter(req.query), req.params.id));
+      } catch (err) {
+        console.error("[CarkedIt API] Brand survey stats error:", err);
+        res.status(500).json({ error: "Failed to retrieve brand survey stats" });
+      }
+    });
+
+    app.get("/api/carkedit/brands/:id/surveys", requireBrandOwner(), (req: any, res: any) => {
+      try {
+        const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+        const offset = parseInt(req.query.offset as string) || 0;
+        res.json(getSurveyResponses(limit, offset, brandDevFilter(req.query), req.params.id));
+      } catch (err) {
+        console.error("[CarkedIt API] Brand surveys error:", err);
+        res.status(500).json({ error: "Failed to retrieve brand surveys" });
+      }
+    });
+
+    app.get("/api/carkedit/brands/:id/users/stats", requireBrandOwner(), (req: any, res: any) => {
+      try {
+        const limit = parseInt((req.query.limit as string) || '200', 10);
+        // includeAccounts folds this brand's signed-up accounts into the list
+        // (replaces the old standalone "signed-up accounts" section).
+        res.json(getUserGameStats({ devFilter: brandDevFilter(req.query), limit, brandId: req.params.id, includeAccounts: true }));
+      } catch (err) {
+        console.error("[CarkedIt API] Brand user stats error:", err);
+        res.status(500).json({ error: "Failed to retrieve brand user stats" });
+      }
+    });
+
+    // Packs are NOT brand-scoped (a brand's players can use any pack); the row's
+    // creator_brand_id lets the client offer a "Brand packs only" filter toggle.
+    app.get("/api/carkedit/brands/:id/packs/stats", requireBrandOwner(), (_req: any, res: any) => {
+      try {
+        res.json({ packs: listPackStatsAll() });
+      } catch (err) {
+        console.error("[CarkedIt API] Brand pack stats error:", err);
+        res.status(500).json({ error: "Failed to retrieve brand pack stats" });
+      }
+    });
+
     // Request to become an Evangelist: any signed-up user submits a brand
     // (name + slug + optional logo). Created status='pending' — an admin must
     // approve it (PATCH below) before the slug resolves. Owner = requester.
@@ -924,6 +1072,21 @@ const server = defineServer({
           status: 'pending',
         });
         res.status(201).json(brand);
+
+        // Notify admins on Discord, pinging Brennan to review the request.
+        try {
+          postWebhookEmbed(
+            buildBrandRequestEmbed({
+              brandName: rawName,
+              slug: slugCheck.slug,
+              requesterName: req.localUser?.display_name || null,
+              apiVersion,
+            }),
+            { content: `<@${ADMIN_DISCORD_USER_ID}>`, allowedMentionUserIds: [ADMIN_DISCORD_USER_ID] },
+          ).catch(() => { /* never throws */ });
+        } catch (notifyErr) {
+          console.warn("[CarkedIt API] discord notify (brand request) failed:", notifyErr);
+        }
       } catch (err) {
         console.error("[CarkedIt API] Create brand error:", err);
         res.status(500).json({ error: "Failed to create brand" });
@@ -2220,25 +2383,27 @@ const server = defineServer({
     // window.__BRAND__ so the client boots co-branded with no extra round-trip;
     // anything else falls through to Express's default 404.
     const indexHtmlPath = path.join(clientDir, 'index.html');
-    app.get(/^\/([A-Za-z0-9-]+)\/?$/, (req: any, res: any, next: any) => {
-      const slug = String(req.params[0] || '').toLowerCase();
-      if (!slug || reservedSlugs.has(slug)) return next();
+    const brandAdminHtmlPath = path.join(clientDir, 'brand-admin.html');
 
+    // Serve a brand's HTML page (index.html for the game, brand-admin.html for
+    // the owner panel) with window.__BRAND__ injected so the client boots with
+    // the brand known and no extra round-trip. Returns false if it couldn't.
+    const serveBrandPage = (slug: string, htmlPath: string, res: any): boolean => {
       let brand;
       try {
         brand = getApprovedBrandBySlug(slug);
       } catch (err) {
         console.error("[CarkedIt API] Brand slug lookup error:", err);
-        return next();
+        return false;
       }
-      if (!brand) return next();
+      if (!brand) return false;
 
       let html: string;
       try {
-        html = fs.readFileSync(indexHtmlPath, 'utf-8');
+        html = fs.readFileSync(htmlPath, 'utf-8');
       } catch (err) {
-        console.error("[CarkedIt API] index.html read error:", err);
-        return next();
+        console.error("[CarkedIt API] Brand page read error:", err);
+        return false;
       }
 
       const payload = JSON.stringify({
@@ -2250,6 +2415,22 @@ const server = defineServer({
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.send(out);
+      return true;
+    };
+
+    // Two-segment owner panel: /<slug>/admin → brand-admin.html (injected brand).
+    // MUST be registered BEFORE the single-segment resolver, else /<slug> matches
+    // first. The real access gate is requireBrandOwner on the /brands/:id/* fetches.
+    app.get(/^\/([A-Za-z0-9-]+)\/admin\/?$/, (req: any, res: any, next: any) => {
+      const slug = String(req.params[0] || '').toLowerCase();
+      if (!slug || reservedSlugs.has(slug)) return next();
+      if (!serveBrandPage(slug, brandAdminHtmlPath, res)) return next();
+    });
+
+    app.get(/^\/([A-Za-z0-9-]+)\/?$/, (req: any, res: any, next: any) => {
+      const slug = String(req.params[0] || '').toLowerCase();
+      if (!slug || reservedSlugs.has(slug)) return next();
+      if (!serveBrandPage(slug, indexHtmlPath, res)) return next();
     });
   },
 });

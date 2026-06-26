@@ -105,3 +105,15 @@ export function setBrandLogo(id: string, logo_url: string): Brand | null {
   db.prepare("UPDATE brands SET logo_url = ?, updated_at = datetime('now') WHERE id = ?").run(logo_url, id);
   return getBrandById(id);
 }
+
+/**
+ * Accounts attribution-tagged to a brand (users.brand_id), newest first.
+ * PII-limited — only id / display_name / created_at, never email or firebase_uid
+ * — for the owner-gated brand-admin "signed-up accounts" panel.
+ */
+export function listBrandUsers(brandId: string): Array<{ id: string; display_name: string; created_at: string }> {
+  const db = getDb();
+  return db.prepare(
+    'SELECT id, display_name, created_at FROM users WHERE brand_id = ? ORDER BY created_at DESC',
+  ).all(brandId) as Array<{ id: string; display_name: string; created_at: string }>;
+}
