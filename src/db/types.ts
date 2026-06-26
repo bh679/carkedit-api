@@ -189,7 +189,15 @@ export type BrandStatus = 'pending' | 'approved' | 'rejected' | 'suspended';
  * A partner-brand ("Evangelist") tenant. Owns a vanity URL (slug) under which
  * the game runs co-branded. `brand_id` on a user is the attribution tag; a
  * game's brand is derived via games.host_user_id → users.brand_id (no column).
- * `theme_json` / `custom_domain` are reserved for future use (nullable today).
+ *
+ * DEFERRED columns (stored, never read yet — no code path touches them):
+ *  - `theme_json`: a future per-brand theme (colors/fonts). v1 co-branding is
+ *    additive (logo + name only). Implementing it needs: (a) the slug resolver
+ *    to inject theme tokens alongside window.__BRAND__, (b) the client to apply
+ *    them as CSS variables, and (c) a Helmet/CSP review if any theme asset is
+ *    served from a new origin. Until then leave it null.
+ *  - `custom_domain`: a future vanity domain (e.g. play.brand.com) → needs DNS
+ *    + reverse-proxy wiring. Null today.
  */
 export interface Brand {
   id: string;

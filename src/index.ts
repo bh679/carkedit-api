@@ -13,7 +13,7 @@ import { GameRoom } from "./rooms/GameRoom.js";
 import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameFilterCounts, getGameById, getStats, getStatsByPeriod, getGamesStats, getGameStateDurations, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev, saveMailingListEntry, getUserGameStats, gameBelongsToBrand } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, setAdminFlag, setUserRole } from "./db/users.js";
 import { createBrand, getBrandBySlug, getApprovedBrandBySlug, listBrandsByOwner, listBrandsWithOwner, listBrandUsers, getSlugAvailability, setBrandStatus } from "./db/brands.js";
-import { validateBrandSlug, buildReservedSlugs } from "./config/brand-config.js";
+import { validateBrandSlug, buildReservedSlugs, ROLE_LABELS } from "./config/brand-config.js";
 import type { BrandStatus } from "./db/types.js";
 import { listPagePermissions, setPagePermission } from "./db/page-permissions.js";
 import { createPack, getPackById, listPacks, updatePack, deletePack, addCards, updateCard, deleteCard, addFavorite, removeFavorite, listUserFavorites, setPackOfficial, setPackDev, setPackBaseCost, getPackStats, listPackStatsAll } from "./db/packs.js";
@@ -29,10 +29,16 @@ import { DEFAULT_STYLE } from "./services/image-gen/default-style.js";
 import githubProxyRouter from "./routes/github-proxy.js";
 import adminDeployTokenRouter from "./routes/admin-deploy-token.js";
 import { validateOptionalString, validateEnum, coerceWinner, coerceGamePlayer } from "./utils/validation.js";
-import { postWebhookEmbed, buildGameFinishEmbed } from "./services/discord/webhook.js";
+import { postWebhookEmbed, buildGameFinishEmbed, buildBrandRequestEmbed } from "./services/discord/webhook.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = parseInt(process.env.PORT || "4500", 10);
+// Discord user pinged to review new partner-brand requests (Brennan).
+const ADMIN_DISCORD_USER_ID = process.env.ADMIN_DISCORD_USER_ID || "342110421114945537";
+const apiVersion: string = (() => {
+  try { return JSON.parse(fs.readFileSync(path.join(__dirname, "../package.json"), "utf-8")).version; }
+  catch { return "0.0.0"; }
+})();
 const clientDir = process.env.CLIENT_DIR || path.join(__dirname, "../../carkedit-client");
 
 // Initialize Firebase Admin SDK. The project_id from the service-account
@@ -842,6 +848,12 @@ const server = defineServer({
       }
     });
 
+    // Public: the configurable role display labels. Single source of truth so
+    // the client doesn't drift from the API's ROLE_LABELS (brand-config.ts).
+    app.get("/api/carkedit/config/labels", (_req: any, res: any) => {
+      res.json({ roleLabels: ROLE_LABELS });
+    });
+
     // ── Partner brands ("Evangelist") ─────────────────────────────────────
     const BRAND_STATUSES: BrandStatus[] = ['pending', 'approved', 'rejected', 'suspended'];
 
@@ -1060,6 +1072,21 @@ const server = defineServer({
           status: 'pending',
         });
         res.status(201).json(brand);
+
+        // Notify admins on Discord, pinging Brennan to review the request.
+        try {
+          postWebhookEmbed(
+            buildBrandRequestEmbed({
+              brandName: rawName,
+              slug: slugCheck.slug,
+              requesterName: req.localUser?.display_name || null,
+              apiVersion,
+            }),
+            { content: `<@${ADMIN_DISCORD_USER_ID}>`, allowedMentionUserIds: [ADMIN_DISCORD_USER_ID] },
+          ).catch(() => { /* never throws */ });
+        } catch (notifyErr) {
+          console.warn("[CarkedIt API] discord notify (brand request) failed:", notifyErr);
+        }
       } catch (err) {
         console.error("[CarkedIt API] Create brand error:", err);
         res.status(500).json({ error: "Failed to create brand" });
