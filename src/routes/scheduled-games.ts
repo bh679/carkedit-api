@@ -35,6 +35,20 @@ const GUEST_HOST_USER_ID = "guest-host";
 
 const MAX_TITLE_LENGTH = 60;
 
+/**
+ * Auth for the host-only endpoints, with the same dev bypass hosting itself
+ * uses — otherwise a reservation made in an un-Firebased local environment
+ * could be created but never listed or cancelled.
+ */
+function requireHost(gate: (req: any, res: any, next: any) => void) {
+  return (req: any, res: any, next: any) => (isGuestHostingAllowed() ? next() : gate(req, res, next));
+}
+
+/** The account a request acts as. Falls back to the dev identity under the bypass. */
+function hostIdentity(req: any): string {
+  return req.localUser?.id ?? GUEST_HOST_USER_ID;
+}
+
 /** Shape returned to clients — never leaks host_user_id or internal ids to joiners. */
 function publicView(row: ScheduledGame) {
   return {
@@ -110,12 +124,11 @@ const router = Router();
 router.post(
   "/",
   publicBodyLimit,
-  (req: any, res: any, next: any) =>
-    isGuestHostingAllowed() ? next() : requireRole("Host")(req, res, next),
+  requireHost(requireRole("Host")),
   async (req: any, res: any) => {
     try {
       const scheduledAt = validateScheduledAt(req.body?.scheduledAt);
-      const hostUserId: string = req.localUser?.id ?? GUEST_HOST_USER_ID;
+      const hostUserId = hostIdentity(req);
       const code = await reserveRoomCode(isCodeLive);
       const row = createScheduledGame({
         room_code: code,
@@ -136,9 +149,9 @@ router.post(
 );
 
 /** The signed-in host's own upcoming games. */
-router.get("/", requireAuth(), (req: any, res: any) => {
+router.get("/", requireHost(requireAuth()), (req: any, res: any) => {
   try {
-    res.json({ games: listScheduledForHost(req.localUser.id).map(ownerView) });
+    res.json({ games: listScheduledForHost(hostIdentity(req)).map(ownerView) });
   } catch (err) {
     console.error("[CarkedIt API] List scheduled games error:", err);
     res.status(500).json({ error: "Failed to load scheduled games" });
@@ -190,10 +203,10 @@ function messageFor(status: string): string {
 }
 
 /** Reschedule / rename — owner only. */
-router.patch("/:id", requireAuth(), publicBodyLimit, (req: any, res: any) => {
+router.patch("/:id", requireHost(requireAuth()), publicBodyLimit, (req: any, res: any) => {
   try {
     const row = getScheduledById(String(req.params.id || ""));
-    if (!row || row.host_user_id !== req.localUser.id) {
+    if (!row || row.host_user_id !== hostIdentity(req)) {
       return res.status(404).json({ error: "Scheduled game not found" });
     }
     if (row.cancelled_at || row.ended_at) {
@@ -212,10 +225,10 @@ router.patch("/:id", requireAuth(), publicBodyLimit, (req: any, res: any) => {
 });
 
 /** Cancel — owner only. Releases the code back to the pool immediately. */
-router.delete("/:id", requireAuth(), (req: any, res: any) => {
+router.delete("/:id", requireHost(requireAuth()), (req: any, res: any) => {
   try {
     const row = getScheduledById(String(req.params.id || ""));
-    if (!row || row.host_user_id !== req.localUser.id) {
+    if (!row || row.host_user_id !== hostIdentity(req)) {
       return res.status(404).json({ error: "Scheduled game not found" });
     }
     cancelScheduledGame(row.id);

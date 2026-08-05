@@ -128,9 +128,28 @@ describe('scheduled games', () => {
       const after = getScheduledById(row.id)!;
       expect(scheduledStatus(after)).toBe('ended');
       expect(isJoinable(after)).toBe(false);
-      // Released, so the code returns to the pool and the link stops resolving.
-      expect(getScheduledByCode('GRAVE')).toBeNull();
+      // The code returns to the pool, but the row still resolves inside its 24h
+      // window so a late click reads "already played" rather than "no such code".
       expect(isCodeReserved('GRAVE')).toBe(false);
+      expect(scheduledStatus(getScheduledByCode('GRAVE')!)).toBe('ended');
+    });
+
+    it('stops resolving a played code once its window has passed', () => {
+      const row = schedule();
+      markScheduledStarted(row.id);
+      markScheduledEnded(row.id);
+      getDb().prepare('UPDATE scheduled_games SET expires_at = ? WHERE id = ?').run(inHours(-1), row.id);
+      expect(getScheduledByCode('GRAVE')).toBeNull();
+    });
+
+    it('gives a recycled code to its new owner, not the played game', () => {
+      const played = schedule({ room_code: 'GRAVE' });
+      markScheduledStarted(played.id);
+      markScheduledEnded(played.id);
+      const reissued = schedule({ room_code: 'GRAVE', scheduled_at: inHours(48) });
+      const resolved = getScheduledByCode('GRAVE')!;
+      expect(resolved.id).toBe(reissued.id);
+      expect(scheduledStatus(resolved)).toBe('scheduled');
     });
 
     it('only records the first start', () => {

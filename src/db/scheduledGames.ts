@@ -106,11 +106,23 @@ export function getScheduledById(id: string): ScheduledGame | null {
   return (getDb().prepare('SELECT * FROM scheduled_games WHERE id = ?').get(id) as ScheduledGame | undefined) ?? null;
 }
 
-/** The active reservation for a code, if any. Released rows are invisible here. */
-export function getScheduledByCode(code: string): ScheduledGame | null {
+/**
+ * The reservation a join link should resolve to. Prefers the active holder of
+ * the code; failing that, falls back to a released row still inside its 24h
+ * window so a link followed shortly after the game can say "already played"
+ * rather than "no such code". Released rows can never be joined — isJoinable()
+ * gates that — and the fallback expires with the window, so a recycled code
+ * always belongs to its new owner.
+ */
+export function getScheduledByCode(code: string, now: Date = new Date()): ScheduledGame | null {
   const row = getDb()
-    .prepare('SELECT * FROM scheduled_games WHERE room_code = ? AND released_at IS NULL')
-    .get(code.toUpperCase()) as ScheduledGame | undefined;
+    .prepare(`
+      SELECT * FROM scheduled_games
+      WHERE room_code = ? AND (released_at IS NULL OR expires_at > ?)
+      ORDER BY (released_at IS NULL) DESC, created_at DESC
+      LIMIT 1
+    `)
+    .get(code.toUpperCase(), now.toISOString()) as ScheduledGame | undefined;
   return row ?? null;
 }
 
