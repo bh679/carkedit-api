@@ -17,6 +17,8 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from './database.js';
 import { ROOM_CODE_WORDS } from '../rooms/roomWords.js';
+import { sanitizeVideoCall } from '../utils/videoCall.js';
+import type { SanitizedVideoCall } from '../utils/videoCall.js';
 import type { ScheduledGame, ScheduledGameStatus } from './types.js';
 
 /** A scheduled game's link stays valid this long past its start time. */
@@ -56,35 +58,26 @@ export function validateScheduledAt(input: unknown, now: Date = new Date()): str
   return at.toISOString();
 }
 
-/** Longest video call link accepted — generous, but not a storage vector. */
-export const MAX_VIDEO_URL_LENGTH = 500;
-
 /**
- * Validate the optional video call link. This is a SECURITY boundary, not a
- * convenience check: the value is rendered as an anchor on three screens, so
- * only http(s) may ever reach the database — `javascript:` and `data:` URLs
- * would execute in the player's page. Empty input means "no call", not an error.
+ * The host's call details for a reservation, in the same {entries, notes}
+ * shape the live room syncs. Sanitized through the shared helper so a
+ * scheduled game can never carry anything the room itself would reject —
+ * every value ends up rendered to players as a link, dial button or code.
  */
-export function normaliseVideoUrl(input: unknown): string | null {
-  if (input === null || input === undefined) return null;
-  if (typeof input !== 'string') {
-    throw new ScheduleValidationError('That video call link is not valid');
-  }
-  const trimmed = input.trim();
-  if (trimmed === '') return null;
-  if (trimmed.length > MAX_VIDEO_URL_LENGTH) {
-    throw new ScheduleValidationError('That video call link is too long');
-  }
-  let parsed: URL;
+export function serializeVideoCall(input: unknown): string | null {
+  const call = sanitizeVideoCall(input);
+  if (call.entries.length === 0 && call.notes === '') return null;
+  return JSON.stringify(call);
+}
+
+/** Parse a stored blob back out, tolerating anything unexpected on disk. */
+export function parseVideoCall(json: string | null): SanitizedVideoCall {
+  if (!json) return { entries: [], notes: '' };
   try {
-    parsed = new URL(trimmed);
+    return sanitizeVideoCall(JSON.parse(json));
   } catch {
-    throw new ScheduleValidationError('Enter a full video call link, starting with https://');
+    return { entries: [], notes: '' };
   }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new ScheduleValidationError('Video call links must start with http:// or https://');
-  }
-  return parsed.toString();
 }
 
 /** True when an unreleased reservation currently holds this code. */
@@ -117,19 +110,19 @@ export function createScheduledGame(data: {
   scheduled_at: string;
   host_user_id: string;
   title?: string | null;
-  video_url?: string | null;
+  video_call?: unknown;
   brand_id?: string | null;
   is_dev?: boolean;
 }): ScheduledGame {
   const db = getDb();
   const id = `sched_${randomUUID()}`;
   db.prepare(`
-    INSERT INTO scheduled_games (id, room_code, scheduled_at, expires_at, created_at, host_user_id, title, video_url, brand_id, is_dev)
+    INSERT INTO scheduled_games (id, room_code, scheduled_at, expires_at, created_at, host_user_id, title, video_call_json, brand_id, is_dev)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id, data.room_code.toUpperCase(), data.scheduled_at, expiresAtFor(data.scheduled_at),
     new Date().toISOString(), data.host_user_id,
-    data.title ?? null, normaliseVideoUrl(data.video_url), data.brand_id ?? null, data.is_dev ? 1 : 0,
+    data.title ?? null, serializeVideoCall(data.video_call), data.brand_id ?? null, data.is_dev ? 1 : 0,
   );
   return getScheduledById(id)!;
 }
@@ -189,7 +182,7 @@ export function listScheduledForHost(hostUserId: string): ScheduledGame[] {
 /** Reschedule / rename. Recomputes expires_at so the TTL tracks the new time. */
 export function updateScheduledGame(
   id: string,
-  fields: { scheduled_at?: string; title?: string | null; video_url?: string | null },
+  fields: { scheduled_at?: string; title?: string | null; video_call?: unknown },
 ): ScheduledGame | null {
   const db = getDb();
   const sets: string[] = [];
@@ -202,9 +195,9 @@ export function updateScheduledGame(
     sets.push('title = ?');
     params.push(fields.title);
   }
-  if (fields.video_url !== undefined) {
-    sets.push('video_url = ?');
-    params.push(normaliseVideoUrl(fields.video_url));
+  if (fields.video_call !== undefined) {
+    sets.push('video_call_json = ?');
+    params.push(serializeVideoCall(fields.video_call));
   }
   if (sets.length === 0) return getScheduledById(id);
   params.push(id);

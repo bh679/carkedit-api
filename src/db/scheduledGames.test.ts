@@ -15,13 +15,13 @@ import {
   isJoinable,
   releaseExpired,
   validateScheduledAt,
-  normaliseVideoUrl,
+  serializeVideoCall,
+  parseVideoCall,
   expiresAtFor,
   ScheduleValidationError,
   CodePoolExhaustedError,
   MIN_LEAD_MINUTES,
   MAX_LEAD_DAYS,
-  MAX_VIDEO_URL_LENGTH,
 } from './scheduledGames.js';
 
 // Each test runs against a fresh in-memory DB carrying the full schema,
@@ -59,47 +59,54 @@ describe('scheduled games', () => {
     });
   });
 
-  describe('normaliseVideoUrl', () => {
-    it('accepts http and https links', () => {
-      expect(normaliseVideoUrl('https://meet.google.com/abc-defg-hij')).toBe('https://meet.google.com/abc-defg-hij');
-      expect(normaliseVideoUrl('http://zoom.us/j/123')).toBe('http://zoom.us/j/123');
+  describe('video call details', () => {
+    const MEET = 'https://meet.google.com/abc-defg-hij';
+
+    it('stores nothing when the host set no call', () => {
+      expect(serializeVideoCall({ entries: [], notes: '' })).toBeNull();
+      expect(serializeVideoCall(undefined)).toBeNull();
+      expect(schedule().video_call_json).toBeNull();
+      expect(parseVideoCall(null)).toEqual({ entries: [], notes: '' });
     });
 
-    it('treats blank input as no call rather than an error', () => {
-      expect(normaliseVideoUrl(undefined)).toBeNull();
-      expect(normaliseVideoUrl(null)).toBeNull();
-      expect(normaliseVideoUrl('   ')).toBeNull();
+    it('round-trips entries and notes through the row', () => {
+      const row = schedule({
+        video_call: {
+          entries: [{ kind: 'link', platform: 'google-meet', value: MEET, label: 'Join Google Meet' }],
+          notes: 'Camera on, please.',
+        },
+      });
+      const call = parseVideoCall(row.video_call_json);
+      expect(call.entries).toHaveLength(1);
+      expect(call.entries[0].value).toBe(MEET);
+      expect(call.notes).toBe('Camera on, please.');
     });
 
-    // The value is rendered as an anchor on three screens, so a script-bearing
-    // scheme must never reach the DB.
-    it('rejects schemes that would execute in the player page', () => {
-      expect(() => normaliseVideoUrl('javascript:alert(1)')).toThrow(ScheduleValidationError);
-      expect(() => normaliseVideoUrl('data:text/html,<script>alert(1)</script>')).toThrow(ScheduleValidationError);
-      expect(() => normaliseVideoUrl('vbscript:msgbox(1)')).toThrow(ScheduleValidationError);
-      expect(() => normaliseVideoUrl('file:///etc/passwd')).toThrow(ScheduleValidationError);
+    // Every value is rendered to players as a link or dial button, so the row
+    // must not be able to carry anything the live room would reject.
+    it('drops entries the room itself would refuse', () => {
+      const row = schedule({
+        video_call: {
+          entries: [
+            { kind: 'link', platform: 'other', value: 'javascript:alert(1)', label: 'Join' },
+            { kind: 'link', platform: 'google-meet', value: MEET, label: 'Join Google Meet' },
+          ],
+          notes: '',
+        },
+      });
+      const call = parseVideoCall(row.video_call_json);
+      expect(call.entries.map((e) => e.value)).toEqual([MEET]);
     });
 
-    it('rejects text that is not a URL, and over-long input', () => {
-      expect(() => normaliseVideoUrl('meet.google.com/abc')).toThrow(/starting with https/);
-      expect(() => normaliseVideoUrl(`https://x.com/${'a'.repeat(MAX_VIDEO_URL_LENGTH)}`)).toThrow(/too long/);
-      expect(() => normaliseVideoUrl(42 as unknown)).toThrow(ScheduleValidationError);
+    it('survives junk on disk rather than throwing', () => {
+      expect(parseVideoCall('not json')).toEqual({ entries: [], notes: '' });
+      expect(parseVideoCall('{"entries":"nope"}')).toEqual({ entries: [], notes: '' });
     });
 
-    it('round-trips through create and update, and clears on empty', () => {
-      const row = schedule({ video_url: 'https://meet.google.com/abc-defg-hij' });
-      expect(row.video_url).toBe('https://meet.google.com/abc-defg-hij');
-
-      const moved = updateScheduledGame(row.id, { video_url: 'https://zoom.us/j/999' })!;
-      expect(moved.video_url).toBe('https://zoom.us/j/999');
-
-      expect(updateScheduledGame(row.id, { video_url: '' })!.video_url).toBeNull();
-    });
-
-    it('refuses to store a bad link on update', () => {
-      const row = schedule({ video_url: 'https://meet.google.com/abc' });
-      expect(() => updateScheduledGame(row.id, { video_url: 'javascript:alert(1)' })).toThrow(ScheduleValidationError);
-      expect(getScheduledById(row.id)!.video_url).toBe('https://meet.google.com/abc');
+    it('is replaceable and clearable via update', () => {
+      const row = schedule({ video_call: { entries: [{ kind: 'link', platform: 'google-meet', value: MEET, label: 'Join' }], notes: '' } });
+      const cleared = updateScheduledGame(row.id, { video_call: { entries: [], notes: '' } })!;
+      expect(cleared.video_call_json).toBeNull();
     });
   });
 

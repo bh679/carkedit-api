@@ -320,9 +320,10 @@ export function initDatabase(dbPath: string = DB_PATH): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       host_user_id TEXT NOT NULL,
       title TEXT,
-      -- Optional Zoom/Meet/FaceTime link the host arranges alongside the game.
-      -- Validated to http(s) before it lands here: it is rendered as a link.
-      video_url TEXT,
+      -- The host's video-call details as JSON: {entries, notes}, the same shape
+      -- the live room syncs. Sanitized by sanitizeVideoCall before it lands
+      -- here — every value is rendered to players.
+      video_call_json TEXT,
       brand_id TEXT,
       is_dev INTEGER NOT NULL DEFAULT 0,
       room_id TEXT,
@@ -378,8 +379,8 @@ export function initDatabase(dbPath: string = DB_PATH): void {
 
   // Migrate: scheduled_games columns added after the table first shipped.
   const schedCols = db.prepare("PRAGMA table_info(scheduled_games)").all().map((c: any) => c.name);
-  if (!schedCols.includes('video_url')) {
-    db.exec('ALTER TABLE scheduled_games ADD COLUMN video_url TEXT');
+  if (!schedCols.includes('video_call_json')) {
+    db.exec('ALTER TABLE scheduled_games ADD COLUMN video_call_json TEXT');
   }
 
   // Migrate: add missing columns to users if needed (for existing DBs)

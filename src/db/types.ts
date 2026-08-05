@@ -199,39 +199,6 @@ export type BrandStatus = 'pending' | 'approved' | 'rejected' | 'suspended';
  *  - `custom_domain`: a future vanity domain (e.g. play.brand.com) → needs DNS
  *    + reverse-proxy wiring. Null today.
  */
-/**
- * States a scheduled lobby can be in from a joiner's point of view.
- * 'scheduled' = reserved, no room up; 'live' = a room is currently running.
- */
-export type ScheduledGameStatus = 'scheduled' | 'live' | 'ended' | 'cancelled' | 'expired';
-
-/** A reserved join code + start time; the durable stand-in for a Colyseus room. */
-export interface ScheduledGame {
-  id: string;
-  room_code: string;
-  /** ISO UTC start time chosen by the host. */
-  scheduled_at: string;
-  /** scheduled_at + 24h; the link stops working after this. */
-  expires_at: string;
-  created_at: string;
-  host_user_id: string;
-  title: string | null;
-  /** Optional Zoom/Meet/FaceTime link; always http(s), validated on write. */
-  video_url: string | null;
-  brand_id: string | null;
-  is_dev: number;
-  /** Live Colyseus roomId, or null when no room is currently up. */
-  room_id: string | null;
-  /** games.id of the room that last hosted this reservation. */
-  game_id: string | null;
-  /** Set the first time the room left the 'lobby' phase. */
-  started_at: string | null;
-  ended_at: string | null;
-  cancelled_at: string | null;
-  /** Set when the code returns to the pool (ended, cancelled or expired). */
-  released_at: string | null;
-}
-
 export interface Brand {
   id: string;
   slug: string;
@@ -254,6 +221,39 @@ export interface Brand {
 export interface BrandWithOwner extends Brand {
   owner_display_name: string | null;
   owner_email: string | null;
+}
+
+/**
+ * States a scheduled lobby can be in from a joiner's point of view.
+ * 'scheduled' = reserved, no room up; 'live' = a room is currently running.
+ */
+export type ScheduledGameStatus = 'scheduled' | 'live' | 'ended' | 'cancelled' | 'expired';
+
+/** A reserved join code + start time; the durable stand-in for a Colyseus room. */
+export interface ScheduledGame {
+  id: string;
+  room_code: string;
+  /** ISO UTC start time chosen by the host. */
+  scheduled_at: string;
+  /** scheduled_at + 24h; the link stops working after this. */
+  expires_at: string;
+  created_at: string;
+  host_user_id: string;
+  title: string | null;
+  /** Sanitized {entries, notes} JSON, or null when the host set no call. */
+  video_call_json: string | null;
+  brand_id: string | null;
+  is_dev: number;
+  /** Live Colyseus roomId, or null when no room is currently up. */
+  room_id: string | null;
+  /** games.id of the room that last hosted this reservation. */
+  game_id: string | null;
+  /** Set the first time the room left the 'lobby' phase. */
+  started_at: string | null;
+  ended_at: string | null;
+  cancelled_at: string | null;
+  /** Set when the code returns to the pool (ended, cancelled or expired). */
+  released_at: string | null;
 }
 
 export interface ExpansionPack {

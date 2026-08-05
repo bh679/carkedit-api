@@ -13,8 +13,9 @@ import { ROOM_CODE_WORDS } from "./roomWords.js";
 import { verifyHostAuthorization } from "./hostAuth.js";
 import { VideoCallEntry } from "../schema/VideoCall.js";
 import { sanitizeVideoCall } from "../utils/videoCall.js";
+import type { SanitizedVideoCall } from "../utils/videoCall.js";
 import { saveGameResult, saveCardPlays, saveCardDraws, saveGameEvent, backfillGameId, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, syncLivePlayers } from "../db/database.js";
-import { getScheduledById, isCodeReserved, setScheduledRoom, markScheduledStarted, markScheduledEnded } from "../db/scheduledGames.js";
+import { getScheduledById, isCodeReserved, setScheduledRoom, markScheduledStarted, markScheduledEnded, updateScheduledGame, parseVideoCall } from "../db/scheduledGames.js";
 import type { GameResult, CardPlay, CardDraw, GameEvent } from "../db/types.js";
 import { postWebhookEmbed, buildGameStartEmbed, buildGameFinishEmbed } from "../services/discord/webhook.js";
 import fs from "fs";
@@ -130,7 +131,10 @@ export class GameRoom extends Room<{ state: GameState }> {
       this.state.roomCode = scheduled.room_code;
       this.state.scheduledAt = scheduled.scheduled_at;
       this.state.scheduledTitle = scheduled.title ?? "";
-      this.state.scheduledVideoUrl = scheduled.video_url ?? "";
+      // Call details were arranged when the game was scheduled, so the room
+      // starts with them rather than waiting for the host to re-enter them
+      // every time the lobby is reopened.
+      this.applyVideoCall(parseVideoCall(scheduled.video_call_json));
       if (scheduled.is_dev) this.state.devMode = true;
       await this.setPrivate(true);
       await this.setMetadata({ roomCode: scheduled.room_code, devMode: this.state.devMode, scheduledId: scheduled.id });
@@ -283,21 +287,17 @@ export class GameRoom extends Room<{ state: GameState }> {
     // after the lobby.
     this.onMessage("set_video_call", (client, data: unknown) => {
       if (this.state.hostId && this.state.hostId !== client.sessionId) return;
-      const { entries, notes } = sanitizeVideoCall(data);
-      this.state.videoCall.clear();
-      for (const e of entries) {
-        const entry = new VideoCallEntry();
-        entry.kind = e.kind;
-        entry.platform = e.platform;
-        entry.value = e.value;
-        entry.label = e.label;
-        this.state.videoCall.push(entry);
+      const call = sanitizeVideoCall(data);
+      this.applyVideoCall(call);
+      // A scheduled room comes and goes; without writing back, a fix the host
+      // made in the lobby would vanish the moment everyone left.
+      if (this._scheduledId) {
+        try { updateScheduledGame(this._scheduledId, { video_call: call }); } catch {}
       }
-      this.state.videoCallNotes = notes;
       this.logEvent(client, "video_call_set", {
-        count: entries.length,
-        platforms: Array.from(new Set(entries.map((e) => e.platform))),
-        hasNotes: notes.length > 0,
+        count: call.entries.length,
+        platforms: Array.from(new Set(call.entries.map((e) => e.platform))),
+        hasNotes: call.notes.length > 0,
       });
     });
 
@@ -490,6 +490,20 @@ export class GameRoom extends Room<{ state: GameState }> {
     this.persistLivePlayers();
 
     console.log(`[GameRoom] ${player.name} joined (${client.sessionId})`);
+  }
+
+  /** Replace the room's call details with an already-sanitized set. */
+  private applyVideoCall(call: SanitizedVideoCall): void {
+    this.state.videoCall.clear();
+    for (const e of call.entries) {
+      const entry = new VideoCallEntry();
+      entry.kind = e.kind;
+      entry.platform = e.platform;
+      entry.value = e.value;
+      entry.label = e.label;
+      this.state.videoCall.push(entry);
+    }
+    this.state.videoCallNotes = call.notes;
   }
 
   /**
