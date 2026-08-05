@@ -71,7 +71,8 @@ export function initDatabase(dbPath: string = DB_PATH): void {
       settings_json TEXT,
       host_ip_hash TEXT,
       host_user_id TEXT,
-      brand_id TEXT
+      brand_id TEXT,
+      scheduled_game_id TEXT
     );
 
     CREATE TABLE IF NOT EXISTS game_players (
@@ -305,6 +306,36 @@ export function initDatabase(dbPath: string = DB_PATH): void {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_mailing_email ON mailing_list(email);
 
+    -- Scheduled lobbies: a host picks a start time and gets a join link now.
+    -- The row is the durable lobby — a Colyseus room only exists while someone
+    -- is connected, so the reservation is what keeps the code alive between
+    -- visits. host_user_id is deliberately NOT a foreign key: user ids get
+    -- rewritten when an anonymous account is linked to Firebase, and an FK here
+    -- would fail that migration.
+    CREATE TABLE IF NOT EXISTS scheduled_games (
+      id TEXT PRIMARY KEY,
+      room_code TEXT NOT NULL,
+      scheduled_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      host_user_id TEXT NOT NULL,
+      title TEXT,
+      brand_id TEXT,
+      is_dev INTEGER NOT NULL DEFAULT 0,
+      room_id TEXT,
+      game_id TEXT,
+      started_at TEXT,
+      ended_at TEXT,
+      cancelled_at TEXT,
+      released_at TEXT
+    );
+    -- Only unreleased reservations hold their code, so a released code returns
+    -- to the word pool without blocking future reservations.
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sched_code_active
+      ON scheduled_games(room_code) WHERE released_at IS NULL;
+    CREATE INDEX IF NOT EXISTS idx_sched_host ON scheduled_games(host_user_id);
+    CREATE INDEX IF NOT EXISTS idx_sched_expires ON scheduled_games(expires_at);
+
     CREATE TABLE IF NOT EXISTS page_permissions (
       path TEXT PRIMARY KEY,
       min_role TEXT NOT NULL,
@@ -329,6 +360,9 @@ export function initDatabase(dbPath: string = DB_PATH): void {
     // Partner-brand PLAY attribution: which brand URL the game was created on
     // (set once at creation from window.brand; distinct from users.brand_id signup attribution).
     ['brand_id', 'ALTER TABLE games ADD COLUMN brand_id TEXT'],
+    // Scheduled lobbies: links a live/finished game back to the reservation it
+    // was spun up from. NULL for ordinary walk-up games.
+    ['scheduled_game_id', 'ALTER TABLE games ADD COLUMN scheduled_game_id TEXT'],
   ];
   for (const [col, sql] of migrations) {
     if (!cols.includes(col)) {
@@ -527,19 +561,21 @@ export interface LiveGameData {
   host_ip_hash?: string;
   host_user_id?: string;
   brand_id?: string | null;
+  scheduled_game_id?: string | null;
 }
 
 export function createLiveGame(data: LiveGameData): string {
   db.prepare(`
     INSERT INTO games (id, started_at, finished_at, mode, room_code, host_name, rounds, player_count,
       winner_name, winner_score, duration_seconds, status, live_status, has_error, is_dev,
-      api_version, client_version, settings_json, host_ip_hash, host_user_id, brand_id)
-    VALUES (?, ?, '', ?, ?, ?, 0, ?, '', 0, NULL, 'lobby', 'live', 0, ?, ?, NULL, NULL, ?, ?, ?)
+      api_version, client_version, settings_json, host_ip_hash, host_user_id, brand_id, scheduled_game_id)
+    VALUES (?, ?, '', ?, ?, ?, 0, ?, '', 0, NULL, 'lobby', 'live', 0, ?, ?, NULL, NULL, ?, ?, ?, ?)
   `).run(
     data.id, data.started_at, data.mode, data.room_code ?? null,
     data.host_name ?? null, data.player_count,
     data.is_dev ? 1 : 0, data.api_version ?? null,
-    data.host_ip_hash ?? null, data.host_user_id ?? null, validGameBrandId(data.brand_id)
+    data.host_ip_hash ?? null, data.host_user_id ?? null, validGameBrandId(data.brand_id),
+    data.scheduled_game_id ?? null
   );
   return data.id;
 }
