@@ -216,6 +216,8 @@ export interface ScheduledGame {
   created_at: string;
   host_user_id: string;
   title: string | null;
+  /** Optional Zoom/Meet/FaceTime link; always http(s), validated on write. */
+  video_url: string | null;
   brand_id: string | null;
   is_dev: number;
   /** Live Colyseus roomId, or null when no room is currently up. */

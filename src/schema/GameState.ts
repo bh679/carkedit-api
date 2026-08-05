@@ -25,6 +25,8 @@ export class GameState extends Schema {
   // server does not gate start_game on it (the host may always start early).
   @type("string") scheduledAt: string = "";
   @type("string") scheduledTitle: string = "";
+  // Optional video call the host arranged for this game; "" when none.
+  @type("string") scheduledVideoUrl: string = "";
   @type("boolean") isPrivate: boolean = false;
   @type("boolean") devMode: boolean = false;
   @type("boolean") autoStartOnReady: boolean = true;

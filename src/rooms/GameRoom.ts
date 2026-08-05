@@ -128,6 +128,7 @@ export class GameRoom extends Room<{ state: GameState }> {
       this.state.roomCode = scheduled.room_code;
       this.state.scheduledAt = scheduled.scheduled_at;
       this.state.scheduledTitle = scheduled.title ?? "";
+      this.state.scheduledVideoUrl = scheduled.video_url ?? "";
       if (scheduled.is_dev) this.state.devMode = true;
       await this.setPrivate(true);
       await this.setMetadata({ roomCode: scheduled.room_code, devMode: this.state.devMode, scheduledId: scheduled.id });

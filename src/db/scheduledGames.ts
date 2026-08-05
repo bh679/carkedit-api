@@ -56,6 +56,37 @@ export function validateScheduledAt(input: unknown, now: Date = new Date()): str
   return at.toISOString();
 }
 
+/** Longest video call link accepted — generous, but not a storage vector. */
+export const MAX_VIDEO_URL_LENGTH = 500;
+
+/**
+ * Validate the optional video call link. This is a SECURITY boundary, not a
+ * convenience check: the value is rendered as an anchor on three screens, so
+ * only http(s) may ever reach the database — `javascript:` and `data:` URLs
+ * would execute in the player's page. Empty input means "no call", not an error.
+ */
+export function normaliseVideoUrl(input: unknown): string | null {
+  if (input === null || input === undefined) return null;
+  if (typeof input !== 'string') {
+    throw new ScheduleValidationError('That video call link is not valid');
+  }
+  const trimmed = input.trim();
+  if (trimmed === '') return null;
+  if (trimmed.length > MAX_VIDEO_URL_LENGTH) {
+    throw new ScheduleValidationError('That video call link is too long');
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new ScheduleValidationError('Enter a full video call link, starting with https://');
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new ScheduleValidationError('Video call links must start with http:// or https://');
+  }
+  return parsed.toString();
+}
+
 /** True when an unreleased reservation currently holds this code. */
 export function isCodeReserved(code: string): boolean {
   const row = getDb()
@@ -86,18 +117,19 @@ export function createScheduledGame(data: {
   scheduled_at: string;
   host_user_id: string;
   title?: string | null;
+  video_url?: string | null;
   brand_id?: string | null;
   is_dev?: boolean;
 }): ScheduledGame {
   const db = getDb();
   const id = `sched_${randomUUID()}`;
   db.prepare(`
-    INSERT INTO scheduled_games (id, room_code, scheduled_at, expires_at, created_at, host_user_id, title, brand_id, is_dev)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO scheduled_games (id, room_code, scheduled_at, expires_at, created_at, host_user_id, title, video_url, brand_id, is_dev)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id, data.room_code.toUpperCase(), data.scheduled_at, expiresAtFor(data.scheduled_at),
     new Date().toISOString(), data.host_user_id,
-    data.title ?? null, data.brand_id ?? null, data.is_dev ? 1 : 0,
+    data.title ?? null, normaliseVideoUrl(data.video_url), data.brand_id ?? null, data.is_dev ? 1 : 0,
   );
   return getScheduledById(id)!;
 }
@@ -157,7 +189,7 @@ export function listScheduledForHost(hostUserId: string): ScheduledGame[] {
 /** Reschedule / rename. Recomputes expires_at so the TTL tracks the new time. */
 export function updateScheduledGame(
   id: string,
-  fields: { scheduled_at?: string; title?: string | null },
+  fields: { scheduled_at?: string; title?: string | null; video_url?: string | null },
 ): ScheduledGame | null {
   const db = getDb();
   const sets: string[] = [];
@@ -169,6 +201,10 @@ export function updateScheduledGame(
   if (fields.title !== undefined) {
     sets.push('title = ?');
     params.push(fields.title);
+  }
+  if (fields.video_url !== undefined) {
+    sets.push('video_url = ?');
+    params.push(normaliseVideoUrl(fields.video_url));
   }
   if (sets.length === 0) return getScheduledById(id);
   params.push(id);

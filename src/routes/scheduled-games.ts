@@ -57,6 +57,8 @@ function publicView(row: ScheduledGame) {
     scheduledAt: row.scheduled_at,
     expiresAt: row.expires_at,
     title: row.title,
+    // Public on purpose: everyone holding the join code needs the call link.
+    videoUrl: row.video_url,
     roomId: row.room_id,
   };
 }
@@ -135,6 +137,7 @@ router.post(
         scheduled_at: scheduledAt,
         host_user_id: hostUserId,
         title: normaliseTitle(req.body?.title),
+        video_url: req.body?.videoUrl,
         brand_id: typeof req.body?.brandId === "string" ? req.body.brandId : null,
         is_dev: !!req.body?.devMode,
       });
@@ -212,9 +215,10 @@ router.patch("/:id", requireHost(requireAuth()), publicBodyLimit, (req: any, res
     if (row.cancelled_at || row.ended_at) {
       return res.status(409).json({ error: "This game can no longer be changed" });
     }
-    const fields: { scheduled_at?: string; title?: string | null } = {};
+    const fields: { scheduled_at?: string; title?: string | null; video_url?: string | null } = {};
     if (req.body?.scheduledAt !== undefined) fields.scheduled_at = validateScheduledAt(req.body.scheduledAt);
     if (req.body?.title !== undefined) fields.title = normaliseTitle(req.body.title);
+    if (req.body?.videoUrl !== undefined) fields.video_url = req.body.videoUrl;
     const updated = updateScheduledGame(row.id, fields);
     res.json(ownerView(updated!));
   } catch (err: any) {
