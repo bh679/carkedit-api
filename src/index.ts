@@ -10,7 +10,7 @@ import multer from "multer";
 import helmet from "helmet";
 import { defineServer, defineRoom, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom.js";
-import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameFilterCounts, getGameById, getStats, getStatsByPeriod, getGamesStats, getGameStateDurations, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev, saveMailingListEntry, getUserGameStats, gameBelongsToBrand } from "./db/database.js";
+import { initDatabase, getDb, saveGameResult, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, getRecentGames, getGameFilterCounts, getGameById, getStats, getStatsByPeriod, getGamesStats, getGameStateDurations, getCardStats, getGameEvents, saveIssueReport, getIssueReports, saveSurveyResponse, getSurveyStats, getSurveyResponses, setGameDev, setSurveyDev, saveMailingListEntry, getUserGameStats, gameBelongsToBrand, listDistinctPlayerNameKeys } from "./db/database.js";
 import { createUser, getUserById, updateUserProfile, linkAnonymousUserToFirebase, listUsers, setAdminFlag, setUserRole } from "./db/users.js";
 import { createBrand, updateBrand, getBrandById, getBrandBySlug, getApprovedBrandBySlug, listBrandsByOwner, listBrandsWithOwner, listBrandUsers, getSlugAvailability, setBrandStatus } from "./db/brands.js";
 import { validateBrandSlug, buildReservedSlugs, ROLE_LABELS } from "./config/brand-config.js";
@@ -21,6 +21,11 @@ import { createGenerationLog, listGenerationLog, mergeLogEntries } from "./db/ge
 import { createCostEntry, getCostByEnvironment } from "./db/cost-entries.js";
 import { optionalAuth, requireAuth, requireAdmin, requireQA, requireBrandOwner, setFirebaseAvailable, isFirebaseAvailable } from "./middleware/auth.js";
 import { isRole } from "./auth/roles.js";
+import {
+  canSeePii, redactGameList, redactGameDetail, redactUserStats,
+  redactSurveyResponses, redactGameEvents, redactIssueReports, redactBrandUsers,
+  isOpaqueKey, resolveOpaqueKey,
+} from "./utils/pii.js";
 import { publicWriteLimiter, publicBodyLimit } from "./middleware/rate-limit.js";
 import { attachRequestId, requestLogger } from "./middleware/request-logger.js";
 import type { GameResult, IssueReport } from "./db/types.js";
@@ -458,7 +463,7 @@ const server = defineServer({
         const devRaw = (req.query.dev as string) || 'nodev';
         const devFilter = (devRaw === 'all' || devRaw === 'dev' || devRaw === 'nodev') ? devRaw : 'nodev';
         const limit = parseInt((req.query.limit as string) || '200', 10);
-        res.json(getUserGameStats({ devFilter, limit }));
+        res.json(redactUserStats(getUserGameStats({ devFilter, limit }), canSeePii(req)));
       } catch (err) {
         console.error("[CarkedIt API] Get user stats error:", err);
         res.status(500).json({ error: "Failed to retrieve user stats" });
@@ -507,10 +512,29 @@ const server = defineServer({
       orderDir: (['asc', 'desc'].includes(q.orderDir) ? q.orderDir : 'desc') as any,
     });
 
+    // A masked viewer holds only the opaque form of a player's name key (see
+    // utils/pii.ts), so the Users-table "expand this player's games" request
+    // arrives hashed. Turn it back into the real name before filtering; an
+    // unmatched key becomes a filter that can never match rather than being
+    // dropped (dropping it would widen the result to ALL games).
+    const NO_MATCH_PLAYER = ' ';
+    const resolvePlayerFilter = (filters: any, reveal: boolean) => {
+      const key = filters.playerName;
+      if (reveal || !key || !isOpaqueKey(key)) return filters;
+      return {
+        ...filters,
+        // A lone space: the query builder trims it to an empty string, which
+        // matches no stored player name, so an unresolvable key returns zero
+        // games instead of silently widening the result to all of them.
+        playerName: resolveOpaqueKey(key, listDistinctPlayerNameKeys()) ?? NO_MATCH_PLAYER,
+      };
+    };
+
     app.get("/api/carkedit/games", requireQA(), (_req: any, res: any) => {
       try {
-        const result = getRecentGames(buildGameFiltersFromQuery(_req.query));
-        res.json(result);
+        const reveal = canSeePii(_req);
+        const result = getRecentGames(resolvePlayerFilter(buildGameFiltersFromQuery(_req.query), reveal));
+        res.json(redactGameList(result, reveal));
       } catch (err) {
         console.error("[CarkedIt API] Get games error:", err);
         res.status(500).json({ error: "Failed to retrieve games" });
@@ -535,7 +559,7 @@ const server = defineServer({
           ...buildGameFiltersFromQuery(req.query),
           hostUserId: req.localUser.id,
         });
-        res.json(result);
+        res.json(redactGameList(result, canSeePii(req)));
       } catch (err) {
         console.error("[CarkedIt API] Get my games error:", err);
         res.status(500).json({ error: "Failed to retrieve games" });
@@ -546,7 +570,7 @@ const server = defineServer({
       try {
         const game = getGameById(req.params.id);
         if (!game) return res.status(404).json({ error: "Game not found" });
-        res.json(game);
+        res.json(redactGameDetail(game, canSeePii(req)));
       } catch (err) {
         console.error("[CarkedIt API] Get game error:", err);
         res.status(500).json({ error: "Failed to retrieve game" });
@@ -555,7 +579,7 @@ const server = defineServer({
 
     app.get("/api/carkedit/games/:id/events", requireQA(), (req: any, res: any) => {
       try {
-        const events = getGameEvents(req.params.id);
+        const events = redactGameEvents(getGameEvents(req.params.id), canSeePii(req));
         res.json({ game_id: req.params.id, events, total: events.length });
       } catch (err) {
         console.error("[CarkedIt API] Get game events error:", err);
@@ -629,7 +653,7 @@ const server = defineServer({
       try {
         const limit = Math.min(parseInt(_req.query.limit as string) || 50, 200);
         const offset = parseInt(_req.query.offset as string) || 0;
-        res.json(getIssueReports(limit, offset));
+        res.json(redactIssueReports(getIssueReports(limit, offset), canSeePii(_req)));
       } catch (err) {
         console.error("[CarkedIt API] Get issue reports error:", err);
         res.status(500).json({ error: "Failed to retrieve issue reports" });
@@ -684,7 +708,7 @@ const server = defineServer({
         const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
         const offset = parseInt(req.query.offset as string) || 0;
         const devFilter = (req.query.dev as string) === 'dev' || (req.query.dev as string) === 'nodev' ? req.query.dev : 'all';
-        res.json(getSurveyResponses(limit, offset, devFilter as any));
+        res.json(redactSurveyResponses(getSurveyResponses(limit, offset, devFilter as any), canSeePii(req)));
       } catch (err) {
         console.error("[CarkedIt API] Get surveys error:", err);
         res.status(500).json({ error: "Failed to retrieve survey responses" });
@@ -926,7 +950,10 @@ const server = defineServer({
       try {
         res.json({
           stats: getGamesStats({ brandId: req.params.id }),
-          recentGames: getRecentGames({ brandId: req.params.id, limit: 10 }).games,
+          recentGames: redactGameList(
+            getRecentGames({ brandId: req.params.id, limit: 10 }),
+            canSeePii(req),
+          ).games,
         });
       } catch (err) {
         console.error("[CarkedIt API] Brand stats error:", err);
@@ -937,7 +964,7 @@ const server = defineServer({
     // Owner-gated: accounts attribution-tagged to this brand (PII-limited).
     app.get("/api/carkedit/brands/:id/users", requireBrandOwner(), (req: any, res: any) => {
       try {
-        res.json({ users: listBrandUsers(req.params.id) });
+        res.json({ users: redactBrandUsers(listBrandUsers(req.params.id), canSeePii(req)) });
       } catch (err) {
         console.error("[CarkedIt API] Brand users error:", err);
         res.status(500).json({ error: "Failed to retrieve brand users" });
@@ -954,7 +981,11 @@ const server = defineServer({
 
     app.get("/api/carkedit/brands/:id/games", requireBrandOwner(), (req: any, res: any) => {
       try {
-        res.json(getRecentGames({ ...buildGameFiltersFromQuery(req.query), brandId: req.params.id }));
+        const reveal = canSeePii(req);
+        res.json(redactGameList(
+          getRecentGames({ ...resolvePlayerFilter(buildGameFiltersFromQuery(req.query), reveal), brandId: req.params.id }),
+          reveal,
+        ));
       } catch (err) {
         console.error("[CarkedIt API] Brand games error:", err);
         res.status(500).json({ error: "Failed to retrieve brand games" });
@@ -990,7 +1021,7 @@ const server = defineServer({
         if (!game || !gameBelongsToBrand(req.params.gameId, req.params.id)) {
           return res.status(404).json({ error: "Game not found" });
         }
-        res.json(game);
+        res.json(redactGameDetail(game, canSeePii(req)));
       } catch (err) {
         console.error("[CarkedIt API] Brand game detail error:", err);
         res.status(500).json({ error: "Failed to retrieve brand game" });
@@ -1019,7 +1050,10 @@ const server = defineServer({
       try {
         const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
         const offset = parseInt(req.query.offset as string) || 0;
-        res.json(getSurveyResponses(limit, offset, brandDevFilter(req.query), req.params.id));
+        res.json(redactSurveyResponses(
+          getSurveyResponses(limit, offset, brandDevFilter(req.query), req.params.id),
+          canSeePii(req),
+        ));
       } catch (err) {
         console.error("[CarkedIt API] Brand surveys error:", err);
         res.status(500).json({ error: "Failed to retrieve brand surveys" });
@@ -1031,7 +1065,10 @@ const server = defineServer({
         const limit = parseInt((req.query.limit as string) || '200', 10);
         // includeAccounts folds this brand's signed-up accounts into the list
         // (replaces the old standalone "signed-up accounts" section).
-        res.json(getUserGameStats({ devFilter: brandDevFilter(req.query), limit, brandId: req.params.id, includeAccounts: true }));
+        res.json(redactUserStats(
+          getUserGameStats({ devFilter: brandDevFilter(req.query), limit, brandId: req.params.id, includeAccounts: true }),
+          canSeePii(req),
+        ));
       } catch (err) {
         console.error("[CarkedIt API] Brand user stats error:", err);
         res.status(500).json({ error: "Failed to retrieve brand user stats" });

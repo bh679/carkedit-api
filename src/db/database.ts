@@ -1032,6 +1032,19 @@ export function gameBelongsToBrand(gameId: string, brandId: string): boolean {
   return !!row;
 }
 
+/**
+ * Every distinct player "name key" (lowercased, trimmed player name) — the same
+ * grouping getUserGameStats uses. Only consumer is the opaque-key reversal in
+ * utils/pii.ts, which re-hashes these to turn a masked viewer's row key back
+ * into a usable games filter.
+ */
+export function listDistinctPlayerNameKeys(): string[] {
+  const rows = db.prepare(
+    `SELECT DISTINCT LOWER(TRIM(player_name)) AS name_key FROM game_players`
+  ).all() as { name_key: string }[];
+  return rows.map(r => r.name_key);
+}
+
 export function setGameDev(gameId: string, isDev: boolean): GameDetail | null {
   const result = db.prepare('UPDATE games SET is_dev = ? WHERE id = ?').run(isDev ? 1 : 0, gameId);
   if (result.changes === 0) return null;
