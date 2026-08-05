@@ -21,6 +21,11 @@ export class GameState extends Schema {
   @type("string") roundWinner: string = "";
   @type("number") roundWinnerCardIndex: number = -1;
   @type("string") roomCode: string = "";
+  // Scheduled lobbies: ISO UTC start time, "" for an ordinary walk-up game.
+  // Drives the client's countdown and the host's "Start now" affordance; the
+  // server does not gate start_game on it (the host may always start early).
+  @type("string") scheduledAt: string = "";
+  @type("string") scheduledTitle: string = "";
   @type("boolean") isPrivate: boolean = false;
   @type("boolean") devMode: boolean = false;
   @type("boolean") autoStartOnReady: boolean = true;

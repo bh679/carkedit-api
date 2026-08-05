@@ -33,6 +33,8 @@ import { listProviders, getProvider, buildPrompt } from "./services/image-gen/in
 import { DEFAULT_STYLE } from "./services/image-gen/default-style.js";
 import githubProxyRouter from "./routes/github-proxy.js";
 import adminDeployTokenRouter from "./routes/admin-deploy-token.js";
+import scheduledGamesRouter from "./routes/scheduled-games.js";
+import { releaseExpired } from "./db/scheduledGames.js";
 import { validateOptionalString, validateEnum, coerceWinner, coerceGamePlayer } from "./utils/validation.js";
 import { postWebhookEmbed, buildGameFinishEmbed, buildBrandRequestEmbed } from "./services/discord/webhook.js";
 
@@ -337,6 +339,9 @@ const server = defineServer({
 
     // Admin: deploy-token bridge (consumed by carkedit-online deploy host page)
     app.use("/api/admin/deploy-token", adminDeployTokenRouter);
+
+    // Scheduled lobbies: reserve a join code + start time now, play later.
+    app.use("/api/carkedit/scheduled", scheduledGamesRouter);
 
     app.get("/api/carkedit/version", (_req: any, res: any) => {
       const pkgPath = path.join(__dirname, "../package.json");
@@ -2558,6 +2563,22 @@ try {
 } catch (err) {
   console.error("[CarkedIt API] Upload-path migration failed:", err);
 }
+
+// Scheduled lobbies: return join codes to the word pool once their 24h window
+// has passed. Runs in-process (there is no cron/worker in this deployment); the
+// lookup endpoint derives expiry independently, so a missed tick only delays
+// code reuse, never keeps a dead link joinable.
+const SCHEDULE_SWEEP_INTERVAL_MS = 15 * 60 * 1000;
+function sweepExpiredSchedules(): void {
+  try {
+    const released = releaseExpired();
+    if (released > 0) console.log(`[CarkedIt API] Released ${released} expired scheduled game code(s)`);
+  } catch (err) {
+    console.error("[CarkedIt API] Scheduled game sweep failed:", err);
+  }
+}
+sweepExpiredSchedules();
+setInterval(sweepExpiredSchedules, SCHEDULE_SWEEP_INTERVAL_MS).unref();
 
 server.listen(port);
 console.log(`[CarkedIt API] Listening on port ${port}`);
