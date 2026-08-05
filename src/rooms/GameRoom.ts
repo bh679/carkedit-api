@@ -11,6 +11,8 @@ import { handleSubmitCard, handleSwapCard, handleRevealComplete, handleRevealSub
 import { handleStartEulogyRound, handleSelectEulogist, handleConfirmEulogists, handleDoneEulogy, handlePickBestEulogy, handleNextWildcard, handleRevealWinner } from "../phases/EulogyPhase.js";
 import { ROOM_CODE_WORDS } from "./roomWords.js";
 import { verifyHostAuthorization } from "./hostAuth.js";
+import { VideoCallEntry } from "../schema/VideoCall.js";
+import { sanitizeVideoCall } from "../utils/videoCall.js";
 import { saveGameResult, saveCardPlays, saveCardDraws, saveGameEvent, backfillGameId, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, syncLivePlayers } from "../db/database.js";
 import { getScheduledById, isCodeReserved, setScheduledRoom, markScheduledStarted, markScheduledEnded } from "../db/scheduledGames.js";
 import type { GameResult, CardPlay, CardDraw, GameEvent } from "../db/types.js";
@@ -273,6 +275,30 @@ export class GameRoom extends Room<{ state: GameState }> {
       for (const [key, value] of Object.entries(data)) {
         this.applySetting(key, value);
       }
+    });
+
+    // Host's video-call details. Deliberately NOT phase-gated like the game
+    // settings above: a call can drop or change mid-game, and the details are
+    // reachable from the in-game header, so the host must be able to fix them
+    // after the lobby.
+    this.onMessage("set_video_call", (client, data: unknown) => {
+      if (this.state.hostId && this.state.hostId !== client.sessionId) return;
+      const { entries, notes } = sanitizeVideoCall(data);
+      this.state.videoCall.clear();
+      for (const e of entries) {
+        const entry = new VideoCallEntry();
+        entry.kind = e.kind;
+        entry.platform = e.platform;
+        entry.value = e.value;
+        entry.label = e.label;
+        this.state.videoCall.push(entry);
+      }
+      this.state.videoCallNotes = notes;
+      this.logEvent(client, "video_call_set", {
+        count: entries.length,
+        platforms: Array.from(new Set(entries.map((e) => e.platform))),
+        hasNotes: notes.length > 0,
+      });
     });
 
     this.onMessage("select_packs", (client, data: { packIds: string[] }) => {

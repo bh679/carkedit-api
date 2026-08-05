@@ -1,6 +1,7 @@
 import { Schema, MapSchema, ArraySchema, type } from "@colyseus/schema";
 import { Player } from "./Player.js";
 import { Card } from "./Card.js";
+import { VideoCallEntry } from "./VideoCall.js";
 
 export type GamePhase =
   | "lobby"
@@ -67,6 +68,11 @@ export class GameState extends Schema {
   // "die" | "live" | "bye". Absence of an entry = that deck is enabled
   // (default-all). Cleared automatically when a pack is unselected.
   @type(["string"]) disabledPackDecks = new ArraySchema<string>();
+
+  // Host's video-call details (link/phone/code entries + free-text instructions).
+  // Host-editable in any phase — a call can break or change mid-game.
+  @type([VideoCallEntry]) videoCall = new ArraySchema<VideoCallEntry>();
+  @type("string") videoCallNotes: string = "";
 
   // Eulogy (Phase 4) state
   @type("string") currentWildcardPlayer: string = "";
