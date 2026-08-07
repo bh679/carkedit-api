@@ -1,9 +1,9 @@
-// CarkedIt API — Partner-brand ("Evangelist") configuration.
+// CarkedIt API — Partner-brand ("Champion") configuration.
 //
 // Single source of truth for three things the brand feature needs server-side:
 //   1. The configurable role DISPLAY LABEL. The product name may change
-//      ("Death Evangelist" → something else) — rename it HERE, in one place.
-//      Code identifiers stay neutral (`brand` / `evangelist`).
+//      ("Champion" → something else) — rename it HERE, in one place.
+//      Code identifiers stay neutral (`brand` / `champion`).
 //   2. The brand-slug FORMAT rule (what a carkedit.com/<slug> may look like).
 //   3. The RESERVED-SLUG guard that stops a partner vanity URL from shadowing
 //      a real page, asset, or API path.
@@ -31,7 +31,7 @@ const RESERVED_DATA = JSON.parse(
  * carkedit-online/js/config/brand-labels.js) — never hardcode it inline.
  */
 export const ROLE_LABELS = {
-  evangelist: { singular: 'Death Evangelist', plural: 'Death Evangelists' },
+  champion: { singular: 'Champion', plural: 'Champions' },
 } as const;
 
 /** Brand slug format: 2–40 chars of lowercase letters, digits, and hyphens. */

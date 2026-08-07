@@ -1,4 +1,4 @@
-// CarkedIt API — Partner-brand ("Evangelist") data access.
+// CarkedIt API — Partner-brand ("Champion") data access.
 //
 // One brand = one vanity URL (slug). Only status='approved' brands resolve
 // their slug to a co-branded page. A game's brand is DERIVED elsewhere via

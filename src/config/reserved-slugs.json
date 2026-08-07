@@ -9,12 +9,13 @@
     "card-test", "color-demo", "deploy", "deploying", "dev-dashboard", "expansions",
     "financial-dashboard", "mockup-menu-layouts", "stats", "stats-games",
     "stats-surveys", "text-card-test", "how-to-play",
-    "brand-admin", "admin-brands", "brand-signup", "evangelist-pricing",
+    "brand-admin", "admin-brands", "brand-signup", "champion-pricing",
+    "evangelist-pricing",
     "account", "menu", "host", "join"
   ],
   "brandWords": [
     "brand", "brands", "branding", "partner", "partners", "sponsor", "sponsors",
-    "evangelist", "evangelists",
+    "champion", "champions", "evangelist", "evangelists",
     "organization", "organizations", "organisation", "organisations", "org", "orgs",
     "company", "companies", "business", "businesses", "agency", "agencies",
     "team", "teams", "group", "groups", "enterprise", "enterprises",
