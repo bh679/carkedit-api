@@ -233,6 +233,37 @@ describe('scheduled games', () => {
       // Sweeping twice must not re-release the same row.
       expect(releaseExpired()).toBe(0);
     });
+
+    it('renames a game without disturbing its time or expiry', () => {
+      const row = schedule({ title: 'Nan’s wake' });
+      const renamed = updateScheduledGame(row.id, { title: 'Nan’s send-off' })!;
+      expect(renamed.title).toBe('Nan’s send-off');
+      expect(renamed.scheduled_at).toBe(row.scheduled_at);
+      expect(renamed.expires_at).toBe(row.expires_at);
+    });
+
+    it('clears the title when the host empties the field', () => {
+      const row = schedule({ title: 'Nan’s wake' });
+      expect(updateScheduledGame(row.id, { title: null })!.title).toBeNull();
+    });
+
+    it('moves the expiry window with a rescheduled start', () => {
+      const row = schedule({ scheduled_at: inHours(24) });
+      const moved = updateScheduledGame(row.id, { scheduled_at: inHours(72) })!;
+      expect(moved.expires_at).toBe(expiresAtFor(moved.scheduled_at));
+      expect(moved.expires_at).not.toBe(row.expires_at);
+    });
+
+    it('changes name and time together in one write', () => {
+      const row = schedule({ title: 'Nan’s wake', scheduled_at: inHours(24) });
+      const at = inHours(48);
+      const updated = updateScheduledGame(row.id, { title: 'Dave’s send-off', scheduled_at: at })!;
+      expect(updated.title).toBe('Dave’s send-off');
+      expect(new Date(updated.scheduled_at).toISOString()).toBe(new Date(at).toISOString());
+      // The code and its holder must survive an edit — the link is already out.
+      expect(updated.room_code).toBe(row.room_code);
+      expect(updated.host_user_id).toBe(row.host_user_id);
+    });
   });
 
   describe('host management', () => {
