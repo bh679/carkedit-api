@@ -492,6 +492,18 @@ export class GameRoom extends Room<{ state: GameState }> {
     console.log(`[GameRoom] ${player.name} joined (${client.sessionId})`);
   }
 
+  /**
+   * Mirror a schedule edit that the REST layer has already validated and
+   * written. Called over matchMaker.remoteRoomCall from PATCH /scheduled/:id —
+   * without it, a host who renames or moves a game while people are sitting in
+   * the lobby would leave every one of them looking at the old banner until the
+   * room disposes. The DB is authoritative here, so this only copies.
+   */
+  applyScheduleUpdate(update: { scheduledAt?: string; title?: string | null }): void {
+    if (update.scheduledAt !== undefined) this.state.scheduledAt = update.scheduledAt;
+    if (update.title !== undefined) this.state.scheduledTitle = update.title ?? "";
+  }
+
   /** Replace the room's call details with an already-sanitized set. */
   private applyVideoCall(call: SanitizedVideoCall): void {
     this.state.videoCall.clear();

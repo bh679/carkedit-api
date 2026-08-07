@@ -82,6 +82,25 @@ async function isRoomAlive(roomId: string): Promise<boolean> {
   return rooms.some((r: any) => r.roomId === roomId);
 }
 
+/**
+ * Mirror a saved schedule edit into the lobby that is already running for it,
+ * so everyone sitting there sees the new name and time at once rather than the
+ * stale ones the room was created with. Best-effort by design: most edits
+ * happen days ahead with no room alive, and a room that disposed mid-request
+ * must not turn a successful save into an error.
+ */
+async function pushScheduleToRoom(roomId: string | null, updated: ScheduledGame): Promise<void> {
+  if (!roomId) return;
+  try {
+    if (!(await isRoomAlive(roomId))) return;
+    await matchMaker.remoteRoomCall(roomId, "applyScheduleUpdate", [
+      { scheduledAt: updated.scheduled_at, title: updated.title },
+    ]);
+  } catch (err) {
+    console.error("[CarkedIt API] Failed to push schedule update to room:", err);
+  }
+}
+
 /** True when a live room already holds this code (walk-up rooms aren't in the DB). */
 async function isCodeLive(code: string): Promise<boolean> {
   const rooms = await matchMaker.query({ name: "game" });
@@ -208,7 +227,7 @@ function messageFor(status: string): string {
 }
 
 /** Reschedule / rename — owner only. */
-router.patch("/:id", requireHost(requireAuth()), publicBodyLimit, (req: any, res: any) => {
+router.patch("/:id", requireHost(requireAuth()), publicBodyLimit, async (req: any, res: any) => {
   try {
     const row = getScheduledById(String(req.params.id || ""));
     if (!row || row.host_user_id !== hostIdentity(req)) {
@@ -224,6 +243,7 @@ router.patch("/:id", requireHost(requireAuth()), publicBodyLimit, (req: any, res
       fields.video_call = { entries: req.body?.videoCall, notes: req.body?.videoCallNotes };
     }
     const updated = updateScheduledGame(row.id, fields);
+    await pushScheduleToRoom(row.room_id, updated!);
     res.json(ownerView(updated!));
   } catch (err: any) {
     if (err instanceof ScheduleValidationError) return res.status(400).json({ error: err.message });
