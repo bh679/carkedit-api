@@ -186,7 +186,7 @@ export interface User {
 export type BrandStatus = 'pending' | 'approved' | 'rejected' | 'suspended';
 
 /**
- * A partner-brand ("Evangelist") tenant. Owns a vanity URL (slug) under which
+ * A partner-brand ("Champion") tenant. Owns a vanity URL (slug) under which
  * the game runs co-branded. `brand_id` on a user is the attribution tag; a
  * game's brand is derived via games.host_user_id → users.brand_id (no column).
  *

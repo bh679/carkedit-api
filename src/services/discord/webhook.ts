@@ -133,7 +133,7 @@ export interface BrandRequestEmbedOpts {
   apiVersion: string;
 }
 
-/** Embed for a new partner-brand ("Evangelist") request awaiting admin review. */
+/** Embed for a new partner-brand ("Champion") request awaiting admin review. */
 export function buildBrandRequestEmbed(opts: BrandRequestEmbedOpts): DiscordEmbed {
   return {
     title: "New brand request",

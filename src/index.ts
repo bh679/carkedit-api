@@ -188,6 +188,11 @@ const server = defineServer({
       next();
     });
 
+    // The pricing page was renamed evangelist-pricing → champion-pricing with the
+    // "Champion" relabel. Registered before express.static so old links/bookmarks
+    // keep working. Staging (Apache) mirrors this in carkedit-online/.htaccess.
+    app.get("/evangelist-pricing", (_req: any, res: any) => res.redirect(301, "/champion-pricing"));
+
     app.use(express.static(clientDir, { extensions: ['html'] }));
 
     // Serve uploaded brand images and card illustrations
@@ -225,7 +230,7 @@ const server = defineServer({
       },
     });
 
-    // Partner-brand ("Evangelist") logo upload. Separate from `brandUpload`
+    // Partner-brand ("Champion") logo upload. Separate from `brandUpload`
     // (whose filename keys off req.params.id, the pack id); brand creation has
     // no :id yet, so the filename is timestamp + short-uuid. Same dir + limits.
     const brandLogoUpload = multer({
@@ -880,10 +885,13 @@ const server = defineServer({
     // Public: the configurable role display labels. Single source of truth so
     // the client doesn't drift from the API's ROLE_LABELS (brand-config.ts).
     app.get("/api/carkedit/config/labels", (_req: any, res: any) => {
-      res.json({ roleLabels: ROLE_LABELS });
+      // `evangelist` mirrors `champion` for clients cached before the Champion
+      // rename, so deploy order between the repos can't surface a stale name.
+      // Safe to delete once prod has served the new client for a release.
+      res.json({ roleLabels: { ...ROLE_LABELS, evangelist: ROLE_LABELS.champion } });
     });
 
-    // ── Partner brands ("Evangelist") ─────────────────────────────────────
+    // ── Partner brands ("Champion") ───────────────────────────────────────
     const BRAND_STATUSES: BrandStatus[] = ['pending', 'approved', 'rejected', 'suspended'];
 
     // Public: resolve an APPROVED slug → minimal brand payload. The slug
@@ -1086,7 +1094,7 @@ const server = defineServer({
       }
     });
 
-    // Request to become an Evangelist: any signed-up user submits a brand
+    // Request to become a Champion: any signed-up user submits a brand
     // (name + slug + optional logo). Created status='pending' — an admin must
     // approve it (PATCH below) before the slug resolves. Owner = requester.
     app.post("/api/carkedit/brands", requireAuth(), brandLogoUpload.single('logo'), (req: any, res: any) => {

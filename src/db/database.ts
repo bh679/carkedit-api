@@ -163,7 +163,7 @@ export function initDatabase(dbPath: string = DB_PATH): void {
     );
     CREATE INDEX IF NOT EXISTS idx_users_firebase_uid ON users(firebase_uid);
 
-    -- Partner brands ("Evangelist"): each owns a vanity URL (slug) under which
+    -- Partner brands ("Champion"): each owns a vanity URL (slug) under which
     -- the game runs co-branded. Placed after the users table so the owner FK
     -- target exists. Only status='approved' brands resolve their slug.
     -- theme_json / custom_domain are reserved for future theming / domains.

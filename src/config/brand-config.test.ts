@@ -57,7 +57,10 @@ describe('reserved-slug guard', () => {
   });
 
   it('reserves the new brand-feature pages', () => {
-    for (const p of ['brand-admin', 'admin-brands', 'brand-signup', 'brands']) {
+    // champion-pricing is the live pricing page; evangelist-pricing stays reserved
+    // so no partner can claim the pre-rename path and shadow its 301 redirect.
+    for (const p of ['brand-admin', 'admin-brands', 'brand-signup', 'brands',
+                     'champion-pricing', 'evangelist-pricing']) {
       expect(validateBrandSlug(p).ok).toBe(false);
     }
   });
@@ -65,7 +68,7 @@ describe('reserved-slug guard', () => {
   it('reserves generic brand / organisation words and their synonyms', () => {
     for (const p of [
       'brand', 'brands', 'branding', 'partner', 'partners', 'sponsor',
-      'evangelist', 'evangelists',
+      'champion', 'champions', 'evangelist', 'evangelists',
       'organization', 'organizations', 'organisation', 'org', 'orgs',
       'company', 'companies', 'business', 'agency', 'team', 'group', 'enterprise',
       'foundation', 'charity', 'nonprofit', 'institution', 'association',
