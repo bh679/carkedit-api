@@ -156,6 +156,7 @@ export type PackStatsRow = {
   title: string;
   creator_id: string;
   creator_name: string | null;
+  creator_brand_id: string | null;
   is_official: boolean;
   is_dev: boolean;
   status: string;
@@ -187,6 +188,7 @@ export function listPackStatsAll(): PackStatsRow[] {
       ep.created_at,
       ep.base_cost_usd,
       u.display_name as creator_name,
+      u.brand_id as creator_brand_id,
       (SELECT COUNT(*) FROM expansion_cards ec WHERE ec.pack_id = ep.id) as card_count,
       (SELECT COUNT(*) FROM expansion_cards ec WHERE ec.pack_id = ep.id AND ec.deck_type = 'die')  as die_count,
       (SELECT COUNT(*) FROM expansion_cards ec WHERE ec.pack_id = ep.id AND ec.deck_type = 'live') as live_count,

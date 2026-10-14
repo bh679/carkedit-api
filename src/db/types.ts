@@ -28,6 +28,7 @@ export interface GameResult {
   settings_json?: string;
   host_ip_hash?: string;
   host_user_id?: string;
+  brand_id?: string | null;
   players: GamePlayerResult[];
 }
 
@@ -46,6 +47,10 @@ export interface UserGameStat {
   birth_month: number | null;
   birth_day: number | null;
   matched_user_created_at: string | null;
+  /** Partner brand the matched account signed up under (null = signed up on root / no account). */
+  signup_brand_id: string | null;
+  signup_brand_name: string | null;
+  signup_brand_slug: string | null;
 }
 
 export interface GameSummary {
@@ -171,8 +176,84 @@ export interface User {
   role: Role;
   birth_month: number;
   birth_day: number;
+  /** Partner brand the account signed up under (attribution tag; never gates access). */
+  brand_id: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** Lifecycle of a partner brand. Only 'approved' brands resolve their slug. */
+export type BrandStatus = 'pending' | 'approved' | 'rejected' | 'suspended';
+
+/**
+ * A partner-brand ("Champion") tenant. Owns a vanity URL (slug) under which
+ * the game runs co-branded. `brand_id` on a user is the attribution tag; a
+ * game's brand is derived via games.host_user_id → users.brand_id (no column).
+ *
+ * DEFERRED columns (stored, never read yet — no code path touches them):
+ *  - `theme_json`: a future per-brand theme (colors/fonts). v1 co-branding is
+ *    additive (logo + name only). Implementing it needs: (a) the slug resolver
+ *    to inject theme tokens alongside window.__BRAND__, (b) the client to apply
+ *    them as CSS variables, and (c) a Helmet/CSP review if any theme asset is
+ *    served from a new origin. Until then leave it null.
+ *  - `custom_domain`: a future vanity domain (e.g. play.brand.com) → needs DNS
+ *    + reverse-proxy wiring. Null today.
+ */
+export interface Brand {
+  id: string;
+  slug: string;
+  name: string;
+  logo_url: string | null;
+  owner_user_id: string;
+  status: BrandStatus;
+  /** Subscription plan chosen at signup ('basic'|'pro'|'ultimate'); null if none. */
+  plan: string | null;
+  /** Contact details captured at signup (email pre-filled from the account). */
+  contact_email: string | null;
+  contact_phone: string | null;
+  theme_json: string | null;
+  custom_domain: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A brand row enriched with its owner's display name + email (admin review UI). */
+export interface BrandWithOwner extends Brand {
+  owner_display_name: string | null;
+  owner_email: string | null;
+}
+
+/**
+ * States a scheduled lobby can be in from a joiner's point of view.
+ * 'scheduled' = reserved, no room up; 'live' = a room is currently running.
+ */
+export type ScheduledGameStatus = 'scheduled' | 'live' | 'ended' | 'cancelled' | 'expired';
+
+/** A reserved join code + start time; the durable stand-in for a Colyseus room. */
+export interface ScheduledGame {
+  id: string;
+  room_code: string;
+  /** ISO UTC start time chosen by the host. */
+  scheduled_at: string;
+  /** scheduled_at + 24h; the link stops working after this. */
+  expires_at: string;
+  created_at: string;
+  host_user_id: string;
+  title: string | null;
+  /** Sanitized {entries, notes} JSON, or null when the host set no call. */
+  video_call_json: string | null;
+  brand_id: string | null;
+  is_dev: number;
+  /** Live Colyseus roomId, or null when no room is currently up. */
+  room_id: string | null;
+  /** games.id of the room that last hosted this reservation. */
+  game_id: string | null;
+  /** Set the first time the room left the 'lobby' phase. */
+  started_at: string | null;
+  ended_at: string | null;
+  cancelled_at: string | null;
+  /** Set when the code returns to the pool (ended, cancelled or expired). */
+  released_at: string | null;
 }
 
 export interface ExpansionPack {
@@ -234,6 +315,23 @@ export interface GenerationLogEntry {
   pack_id: string | null;      // expansion pack this generation was for (null = scratch/unknown)
   card_id: string | null;      // expansion card this generation was for (null = scratch/unknown)
   created_at: string;
+}
+
+/** Unified cost entry — remote env reports (dev/staging → play), AWS/Cloudflare, manual, etc. */
+export interface CostEntry {
+  id: string;
+  service: string;
+  category: string;
+  description: string;
+  amount_usd: number;
+  period_start: string;
+  period_end: string;
+  environment: string;
+  source: string;
+  source_ref: string | null;
+  entered_by: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface SurveyResponse {

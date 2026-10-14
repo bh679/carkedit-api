@@ -7,11 +7,17 @@ import { getCardsByPackIds, recordPackUsage } from "../db/packs.js";
 import { computeDodTurnOrder } from "../utils/turnOrder.js";
 import { DIE_CARDS, LIVING_CARDS, BYE_CARDS } from "../data/cards.js";
 import { handleRevealDie, handleEndDieTurn } from "../phases/DiePhase.js";
-import { handleSubmitCard, handleRevealComplete, handleRevealSubmission, handleEndConvinceTurn, handleSelectWinner, handleNextRound } from "../phases/LivingPhase.js";
+import { handleSubmitCard, handleSwapCard, handleRevealComplete, handleRevealSubmission, handleEndConvinceTurn, handleSelectWinner, handleNextRound } from "../phases/LivingPhase.js";
 import { handleStartEulogyRound, handleSelectEulogist, handleConfirmEulogists, handleDoneEulogy, handlePickBestEulogy, handleNextWildcard, handleRevealWinner } from "../phases/EulogyPhase.js";
 import { ROOM_CODE_WORDS } from "./roomWords.js";
-import { saveGameResult, saveCardPlays, saveCardDraws, saveGameEvent, backfillGameId, createLiveGame, updateLiveGame, completeLiveGame, abandonGame } from "../db/database.js";
+import { verifyHostAuthorization } from "./hostAuth.js";
+import { VideoCallEntry } from "../schema/VideoCall.js";
+import { sanitizeVideoCall } from "../utils/videoCall.js";
+import type { SanitizedVideoCall } from "../utils/videoCall.js";
+import { saveGameResult, saveCardPlays, saveCardDraws, saveGameEvent, backfillGameId, createLiveGame, updateLiveGame, completeLiveGame, abandonGame, syncLivePlayers } from "../db/database.js";
+import { getScheduledById, isCodeReserved, setScheduledRoom, markScheduledStarted, markScheduledEnded, updateScheduledGame, parseVideoCall } from "../db/scheduledGames.js";
 import type { GameResult, CardPlay, CardDraw, GameEvent } from "../db/types.js";
+import { postWebhookEmbed, buildGameStartEmbed, buildGameFinishEmbed } from "../services/discord/webhook.js";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -21,7 +27,25 @@ const apiPkg = JSON.parse(fs.readFileSync(path.join(__dirnameGR, "../../package.
 
 const MIN_PLAYERS = 2;
 
+const CODE_DRAW_ATTEMPTS = 25;
+
+/**
+ * Draw a code for a walk-up room. Codes held by an active scheduled reservation
+ * are skipped so a spontaneous game can never steal a shared scheduled link;
+ * beyond that the historical behaviour (random word, collisions tolerated) is
+ * unchanged. Falls through to a plain draw if the pool lookup fails so room
+ * creation never depends on the DB.
+ */
 function generateRoomCode(): string {
+  for (let i = 0; i < CODE_DRAW_ATTEMPTS; i++) {
+    const code = ROOM_CODE_WORDS[Math.floor(Math.random() * ROOM_CODE_WORDS.length)];
+    try {
+      if (isCodeReserved(code)) continue;
+    } catch {
+      return code;
+    }
+    return code;
+  }
   return ROOM_CODE_WORDS[Math.floor(Math.random() * ROOM_CODE_WORDS.length)];
 }
 
@@ -32,8 +56,32 @@ export class GameRoom extends Room<{ state: GameState }> {
   private _cardPlays: CardPlay[] = [];
   private _previousPhase: string = "lobby";
   private _gameId: string | null = null;
+  private _hostUserId: string | null = null;
+  private _scheduledId: string | null = null;
 
   async onCreate(options: any) {
+    // A scheduled lobby's room is spun up server-side (see routes/scheduled-games.ts)
+    // when anyone opens the join link — including guests, who could never call
+    // client.create() themselves. The reservation row is the host's standing
+    // authorization, so host verification is satisfied by loading it. options
+    // .scheduledId is therefore only ever passed by our own matchMaker call.
+    const scheduled = options.scheduledId ? getScheduledById(options.scheduledId) : null;
+    if (options.scheduledId && !scheduled) {
+      throw new Error("That scheduled game no longer exists");
+    }
+
+    let hostUser = null;
+    if (scheduled) {
+      this._scheduledId = scheduled.id;
+      this._hostUserId = scheduled.host_user_id;
+    } else {
+      // Hosting requires a signed-up account (joining does not). Runs before
+      // any state/DB setup so a rejected create persists nothing; throwing
+      // here rejects the client's create() call with the error message.
+      hostUser = await verifyHostAuthorization(options.authToken);
+      this._hostUserId = hostUser?.id ?? null;
+    }
+
     this.setState(new GameState());
     // Default to the base CarkedIt deck enabled (sentinel pack id "base")
     this.state.selectedPackIds.push("base");
@@ -62,6 +110,11 @@ export class GameRoom extends Room<{ state: GameState }> {
         if (this._gameId) {
           try { updateLiveGame(this._gameId, { status: this.state.phase }); } catch {}
         }
+        // Leaving the lobby means the scheduled game genuinely ran — this is
+        // what makes its link die on dispose instead of staying joinable.
+        if (this._scheduledId && this.state.phase !== "lobby") {
+          try { markScheduledStarted(this._scheduledId); } catch {}
+        }
       }
     }, 1000);
 
@@ -70,7 +123,22 @@ export class GameRoom extends Room<{ state: GameState }> {
       this.state.devMode = true;
     }
 
-    if (options.private) {
+    if (scheduled) {
+      // Reuse the reserved code rather than drawing a new one: the link the
+      // host shared days ago has to keep resolving across every room this
+      // reservation spins up.
+      this.state.isPrivate = true;
+      this.state.roomCode = scheduled.room_code;
+      this.state.scheduledAt = scheduled.scheduled_at;
+      this.state.scheduledTitle = scheduled.title ?? "";
+      // Call details were arranged when the game was scheduled, so the room
+      // starts with them rather than waiting for the host to re-enter them
+      // every time the lobby is reopened.
+      this.applyVideoCall(parseVideoCall(scheduled.video_call_json));
+      if (scheduled.is_dev) this.state.devMode = true;
+      await this.setPrivate(true);
+      await this.setMetadata({ roomCode: scheduled.room_code, devMode: this.state.devMode, scheduledId: scheduled.id });
+    } else if (options.private) {
       const roomCode = generateRoomCode();
       this.state.isPrivate = true;
       this.state.roomCode = roomCode;
@@ -89,7 +157,12 @@ export class GameRoom extends Room<{ state: GameState }> {
         player_count: 0,
         is_dev: this.state.devMode,
         api_version: apiPkg.version,
+        brand_id: scheduled ? scheduled.brand_id : options?.brandId,  // play attribution (brand URL host created on); validated in createLiveGame
+        host_user_id: scheduled ? scheduled.host_user_id : undefined,
+        scheduled_game_id: scheduled ? scheduled.id : undefined,
       });
+      // A reservation can outlive many rooms; always point it at the current one.
+      if (scheduled) setScheduledRoom(scheduled.id, this.roomId, this._gameId);
       console.log(`[GameRoom] Live game created in DB: ${this._gameId}`);
     } catch (err) {
       console.error(`[GameRoom] Failed to create live game:`, err);
@@ -99,6 +172,8 @@ export class GameRoom extends Room<{ state: GameState }> {
       isPrivate: this.state.isPrivate,
       roomCode: this.state.roomCode || null,
       devMode: this.state.devMode,
+      hostAuthBypassed: !scheduled && hostUser === null,
+      scheduledId: this._scheduledId,
     });
 
     this.onMessage("ready", (client) => {
@@ -111,6 +186,7 @@ export class GameRoom extends Room<{ state: GameState }> {
         const oldName = player.name;
         player.name = data.name;
         this.logEvent(client, "name_changed", { oldName, newName: data.name });
+        this.persistLivePlayers();
       }
     });
 
@@ -145,6 +221,11 @@ export class GameRoom extends Room<{ state: GameState }> {
     this.onMessage("submit_card", (client, data: { cardIndex: number }) => {
       this.logEvent(client, "card_submitted", { cardIndex: data.cardIndex });
       handleSubmitCard(this.state, client, data.cardIndex);
+    });
+
+    this.onMessage("swap_card", (client, data: { cardIndex: number }) => {
+      this.logEvent(client, "card_swapped", { cardIndex: data.cardIndex });
+      handleSwapCard(this.state, client, data.cardIndex);
     });
 
     this.onMessage("reveal_complete", (client) => {
@@ -198,6 +279,26 @@ export class GameRoom extends Room<{ state: GameState }> {
       for (const [key, value] of Object.entries(data)) {
         this.applySetting(key, value);
       }
+    });
+
+    // Host's video-call details. Deliberately NOT phase-gated like the game
+    // settings above: a call can drop or change mid-game, and the details are
+    // reachable from the in-game header, so the host must be able to fix them
+    // after the lobby.
+    this.onMessage("set_video_call", (client, data: unknown) => {
+      if (this.state.hostId && this.state.hostId !== client.sessionId) return;
+      const call = sanitizeVideoCall(data);
+      this.applyVideoCall(call);
+      // A scheduled room comes and goes; without writing back, a fix the host
+      // made in the lobby would vanish the moment everyone left.
+      if (this._scheduledId) {
+        try { updateScheduledGame(this._scheduledId, { video_call: call }); } catch {}
+      }
+      this.logEvent(client, "video_call_set", {
+        count: call.entries.length,
+        platforms: Array.from(new Set(call.entries.map((e) => e.platform))),
+        hasNotes: call.notes.length > 0,
+      });
     });
 
     this.onMessage("select_packs", (client, data: { packIds: string[] }) => {
@@ -315,7 +416,23 @@ export class GameRoom extends Room<{ state: GameState }> {
     console.log(`[GameRoom] Room created`);
   }
 
-  onJoin(client: Client, options: any) {
+  /**
+   * Snapshot the current roster into game_players so the player/users stats
+   * (incl. the brand admin panel) reflect this LIVE game, not only completed
+   * ones. Best-effort: never throws into the game loop.
+   */
+  private persistLivePlayers(): void {
+    if (!this._gameId) return;
+    try {
+      const names: string[] = [];
+      this.state.players.forEach((p) => { if (p?.name) names.push(p.name); });
+      syncLivePlayers(this._gameId, names);
+    } catch (err) {
+      console.error('[GameRoom] persistLivePlayers failed:', err);
+    }
+  }
+
+  async onJoin(client: Client, options: any) {
     const player = new Player();
     player.sessionId = client.sessionId;
     player.name = options.name || `Player ${this.state.players.size + 1}`;
@@ -326,12 +443,22 @@ export class GameRoom extends Room<{ state: GameState }> {
     player.birthMonth = (month >= 1 && month <= 12) ? month : 0;
     player.birthDay = (day >= 1 && day <= 31) ? day : 0;
     player.isDevName = !!options.isDevName;
-    player.userId = options.userId || "";
+
+    // A scheduled room is created by whoever opens the link first — often a
+    // guest — so the scheduler has to be able to claim the host seat whenever
+    // they turn up. Only a verified Firebase token proves that; client-supplied
+    // userId is not trusted here, since Player.userId is synced to every client
+    // and would otherwise be trivially replayable.
+    const isScheduler = this._scheduledId ? await this.verifyScheduler(options.authToken) : false;
+    const isHost = isScheduler || !this.state.hostId;
+    // The host's identity comes from the token verified in onCreate — never
+    // from client-supplied options. Joiners keep the existing trust model.
+    player.userId = (isHost && this._hostUserId) ? this._hostUserId : (options.userId || "");
     this.state.players.set(client.sessionId, player);
 
-    const isHost = !this.state.hostId;
-    // First player to join becomes the host
-    if (!this.state.hostId) {
+    // First player to join becomes the host — but in a scheduled room they only
+    // hold the seat until the scheduler arrives and takes it back.
+    if (isScheduler || !this.state.hostId) {
       this.state.hostId = client.sessionId;
     }
 
@@ -368,8 +495,51 @@ export class GameRoom extends Room<{ state: GameState }> {
         });
       } catch {}
     }
+    // Reflect the new roster in player stats while the game is still live.
+    this.persistLivePlayers();
 
     console.log(`[GameRoom] ${player.name} joined (${client.sessionId})`);
+  }
+
+  /**
+   * Mirror a schedule edit that the REST layer has already validated and
+   * written. Called over matchMaker.remoteRoomCall from PATCH /scheduled/:id —
+   * without it, a host who renames or moves a game while people are sitting in
+   * the lobby would leave every one of them looking at the old banner until the
+   * room disposes. The DB is authoritative here, so this only copies.
+   */
+  applyScheduleUpdate(update: { scheduledAt?: string; title?: string | null }): void {
+    if (update.scheduledAt !== undefined) this.state.scheduledAt = update.scheduledAt;
+    if (update.title !== undefined) this.state.scheduledTitle = update.title ?? "";
+  }
+
+  /** Replace the room's call details with an already-sanitized set. */
+  private applyVideoCall(call: SanitizedVideoCall): void {
+    this.state.videoCall.clear();
+    for (const e of call.entries) {
+      const entry = new VideoCallEntry();
+      entry.kind = e.kind;
+      entry.platform = e.platform;
+      entry.value = e.value;
+      entry.label = e.label;
+      this.state.videoCall.push(entry);
+    }
+    this.state.videoCallNotes = call.notes;
+  }
+
+  /**
+   * True when this joiner's token resolves to the account that scheduled the
+   * game. Never throws — a bad or missing token just means "not the scheduler",
+   * so a failed check can't block someone from joining.
+   */
+  private async verifyScheduler(authToken: unknown): Promise<boolean> {
+    if (!this._hostUserId || typeof authToken !== "string" || authToken.length === 0) return false;
+    try {
+      const user = await verifyHostAuthorization(authToken);
+      return user !== null && user.id === this._hostUserId;
+    } catch {
+      return false;
+    }
   }
 
   async onLeave(client: Client, _code?: number) {
@@ -386,6 +556,7 @@ export class GameRoom extends Room<{ state: GameState }> {
 
     if (this.state.phase === "lobby") {
       this.state.players.delete(client.sessionId);
+      this.persistLivePlayers();
       return;
     }
 
@@ -421,6 +592,23 @@ export class GameRoom extends Room<{ state: GameState }> {
       }
     }
 
+    // A scheduled lobby's room comes and goes freely before the start: clearing
+    // room_id just means "nobody is here right now", and the next visitor spins
+    // a fresh room up on the same code. Once the game has actually started,
+    // though, the room going away ends it — and the link with it.
+    if (this._scheduledId) {
+      try {
+        const scheduled = getScheduledById(this._scheduledId);
+        if (scheduled?.started_at) {
+          markScheduledEnded(this._scheduledId);
+        } else {
+          setScheduledRoom(this._scheduledId, null);
+        }
+      } catch (err) {
+        console.error(`[GameRoom] Failed to update scheduled game on dispose:`, err);
+      }
+    }
+
     console.log(`[GameRoom] Room disposed`);
   }
 
@@ -430,7 +618,7 @@ export class GameRoom extends Room<{ state: GameState }> {
       "autoStartOnReady", "enableDie", "enableLive", "enableBye", "enableEulogy",
       "playableWildcards", "optionalCardPlay", "ultraQuickMode",
       "timerEnabled", "pitchTimerEnabled", "playCardTimerEnabled",
-      "timerCountUp", "timerVisible", "timerAutoAdvance",
+      "timerCountUp", "timerVisible", "timerAutoAdvance", "showCardReveal",
     ];
     if (boolKeys.includes(key) && typeof value === "boolean") {
       (this.state as any)[key] = value;
@@ -566,7 +754,7 @@ export class GameRoom extends Room<{ state: GameState }> {
       const settingKeys = [
         "rounds", "handSize", "enableDie", "enableLive", "enableBye", "enableEulogy",
         "forceWildcards", "playableWildcards", "wildcardCount", "eulogistCount",
-        "optionalCardPlay", "ultraQuickMode", "timerEnabled", "pitchDuration",
+        "optionalCardPlay", "ultraQuickMode", "timerEnabled", "pitchDuration", "showCardReveal",
       ];
       for (const key of settingKeys) {
         settings[key] = (this.state as any)[key];
@@ -609,6 +797,25 @@ export class GameRoom extends Room<{ state: GameState }> {
         durationSeconds,
         playerCount: sorted.length,
       });
+
+      if (!this.state.devMode) {
+        try {
+          const embed = buildGameFinishEmbed({
+            mode: "online",
+            roomCode: this.state.roomCode || null,
+            hostName: hostPlayer?.name || null,
+            winnerName: sorted[0]?.name || null,
+            winnerScore: sorted[0]?.score ?? null,
+            playerCount: sorted.length,
+            rounds: this.state.rounds,
+            durationSeconds: durationSeconds ?? null,
+            apiVersion: apiPkg.version,
+          });
+          postWebhookEmbed(embed).catch(() => { /* never throws, defensive */ });
+        } catch (err) {
+          console.warn(`[GameRoom] discord notify (finish) failed:`, err);
+        }
+      }
     } catch (err) {
       console.error("[GameRoom] Failed to save game result:", err);
     }
@@ -761,6 +968,22 @@ export class GameRoom extends Room<{ state: GameState }> {
         enableEulogy: this.state.enableEulogy,
       },
     });
+
+    if (!this.state.devMode) {
+      try {
+        const hostPlayer = this.state.hostId ? this.state.players.get(this.state.hostId) : null;
+        const embed = buildGameStartEmbed({
+          mode: "online",
+          roomCode: this.state.roomCode || null,
+          hostName: hostPlayer?.name || null,
+          playerCount: this.state.players.size,
+          apiVersion: apiPkg.version,
+        });
+        postWebhookEmbed(embed).catch(() => { /* never throws, defensive */ });
+      } catch (err) {
+        console.warn(`[GameRoom] discord notify (start) failed:`, err);
+      }
+    }
 
     console.log(`[GameRoom] Phase: die_phase — ${this.state.currentTurn}'s turn`);
   }

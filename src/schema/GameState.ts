@@ -1,6 +1,7 @@
 import { Schema, MapSchema, ArraySchema, type } from "@colyseus/schema";
 import { Player } from "./Player.js";
 import { Card } from "./Card.js";
+import { VideoCallEntry } from "./VideoCall.js";
 
 export type GamePhase =
   | "lobby"
@@ -20,6 +21,11 @@ export class GameState extends Schema {
   @type("string") roundWinner: string = "";
   @type("number") roundWinnerCardIndex: number = -1;
   @type("string") roomCode: string = "";
+  // Scheduled lobbies: ISO UTC start time, "" for an ordinary walk-up game.
+  // Drives the client's countdown and the host's "Start now" affordance; the
+  // server does not gate start_game on it (the host may always start early).
+  @type("string") scheduledAt: string = "";
+  @type("string") scheduledTitle: string = "";
   @type("boolean") isPrivate: boolean = false;
   @type("boolean") devMode: boolean = false;
   @type("boolean") autoStartOnReady: boolean = true;
@@ -32,7 +38,7 @@ export class GameState extends Schema {
   @type(["string"]) turnOrder = new ArraySchema<string>();
 
   // Game settings (synced to all clients, host-editable during lobby)
-  @type("number") rounds: number = 2;
+  @type("number") rounds: number = 1;
   @type("number") handSize: number = 5;
   @type("boolean") enableDie: boolean = true;
   @type("boolean") enableLive: boolean = true;
@@ -52,6 +58,7 @@ export class GameState extends Schema {
   @type("boolean") timerAutoAdvance: boolean = true;
   @type("boolean") ultraQuickMode: boolean = false;
   @type("boolean") optionalCardPlay: boolean = false;
+  @type("boolean") showCardReveal: boolean = false;
 
   // Expansion packs selected for this game (host-editable in lobby)
   @type(["string"]) selectedPackIds = new ArraySchema<string>();
@@ -59,6 +66,11 @@ export class GameState extends Schema {
   // "die" | "live" | "bye". Absence of an entry = that deck is enabled
   // (default-all). Cleared automatically when a pack is unselected.
   @type(["string"]) disabledPackDecks = new ArraySchema<string>();
+
+  // Host's video-call details (link/phone/code entries + free-text instructions).
+  // Host-editable in any phase — a call can break or change mid-game.
+  @type([VideoCallEntry]) videoCall = new ArraySchema<VideoCallEntry>();
+  @type("string") videoCallNotes: string = "";
 
   // Eulogy (Phase 4) state
   @type("string") currentWildcardPlayer: string = "";
