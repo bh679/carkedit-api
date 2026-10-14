@@ -34,6 +34,7 @@ import { DEFAULT_STYLE } from "./services/image-gen/default-style.js";
 import githubProxyRouter from "./routes/github-proxy.js";
 import adminDeployTokenRouter from "./routes/admin-deploy-token.js";
 import scheduledGamesRouter from "./routes/scheduled-games.js";
+import lifeStoryRouter from "./routes/life-story.js";
 import { releaseExpired } from "./db/scheduledGames.js";
 import { validateOptionalString, validateEnum, coerceWinner, coerceGamePlayer } from "./utils/validation.js";
 import { postWebhookEmbed, buildGameFinishEmbed, buildBrandRequestEmbed } from "./services/discord/webhook.js";
@@ -347,6 +348,9 @@ const server = defineServer({
 
     // Scheduled lobbies: reserve a join code + start time now, play later.
     app.use("/api/carkedit/scheduled", scheduledGamesRouter);
+
+    // Single player: Claude writes a life story from the picks + eulogy.
+    app.use("/api/carkedit/solo", lifeStoryRouter);
 
     app.get("/api/carkedit/version", (_req: any, res: any) => {
       const pkgPath = path.join(__dirname, "../package.json");

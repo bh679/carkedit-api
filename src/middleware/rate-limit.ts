@@ -13,6 +13,18 @@ export const publicWriteLimiter = rateLimit({
   message: { error: 'Too many requests, please try again later' },
 });
 
+/**
+ * Tight limiter for the public solo life-story route, which calls a paid LLM.
+ * 5 requests per 15-minute window per IP.
+ */
+export const storyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many stories, please try again later' },
+});
+
 const PUBLIC_BODY_LIMIT = 256 * 1024; // 256kb
 
 /**
