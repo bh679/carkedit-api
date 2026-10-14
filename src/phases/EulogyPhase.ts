@@ -36,6 +36,8 @@ export function transitionToEulogy(state: GameState): void {
 
   wildcardIds.forEach((id) => state.wildcardPlayerIds.push(id));
   state.currentWildcardPlayer = wildcardIds[0];
+  // Reset ready flags so the eulogy_intro screen requires fresh acknowledgement.
+  state.players.forEach((p) => { p.ready = false; });
   state.phase = "eulogy_intro";
 
   console.log(`[EulogyPhase] ${wildcardIds.length} wildcard holder(s) — entering eulogy intro`);
