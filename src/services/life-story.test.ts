@@ -7,6 +7,7 @@ import {
   StoryUpstreamError,
   DEFAULT_STORY_MODEL,
   STORY_MAX_TOKENS,
+  thinkingFor,
   STORY_SYSTEM_PROMPT,
   LIMITS,
   clampStory,
@@ -34,6 +35,15 @@ describe("validateStoryInput", () => {
     expect(input.picks.bye).toEqual({ title: "Became a ghost", description: "Haunts the pokies", answer: "" });
   });
 
+  it("keeps a valid would-rather card and omits it when absent", () => {
+    const input = validateStoryInput({
+      ...validBody,
+      picks: { ...validBody.picks, die: { ...validBody.picks.die, rather: { title: " In my sleep ", answer: "Snoring" } } },
+    });
+    expect(input.picks.die.rather).toEqual({ title: "In my sleep", description: "", answer: "Snoring" });
+    expect(input.picks.live).not.toHaveProperty("rather");
+  });
+
   it("allows an empty eulogy", () => {
     expect(validateStoryInput({ ...validBody, eulogy: undefined }).eulogy).toBe("");
   });
@@ -46,6 +56,9 @@ describe("validateStoryInput", () => {
     [{ picks: { ...validBody.picks, die: { title: 42 } } }],
     [{ ...validBody, eulogy: "x".repeat(LIMITS.eulogy + 1) }],
     [{ picks: { ...validBody.picks, bye: { title: "x".repeat(LIMITS.title + 1) } } }],
+    [{ picks: { ...validBody.picks, die: { ...validBody.picks.die, rather: "nope" } } }],
+    [{ picks: { ...validBody.picks, die: { ...validBody.picks.die, rather: { title: "" } } } }],
+    [{ picks: { ...validBody.picks, live: { ...validBody.picks.live, rather: { title: "x".repeat(LIMITS.title + 1) } } } }],
   ])("rejects %j", (body) => {
     expect(() => validateStoryInput(body)).toThrow(StoryValidationError);
   });
@@ -60,6 +73,21 @@ describe("buildStoryPrompt", () => {
     expect(prompt).toContain("Card detail: Haunts the pokies");
     expect(prompt).toContain("Gone too soon.");
     expect(prompt.indexOf("</player_input>")).toBeGreaterThan(prompt.indexOf("Gone too soon."));
+  });
+
+  it("describes the would-rather card when it differs, and notes when it matches", () => {
+    const prompt = buildStoryPrompt(validateStoryInput({
+      ...validBody,
+      picks: {
+        ...validBody.picks,
+        die: { ...validBody.picks.die, rather: { title: "In my sleep", description: "Peaceful" } },
+        live: { ...validBody.picks.live, rather: { title: "Ran a pub" } },
+      },
+    }));
+    expect(prompt).toContain("What they would rather: In my sleep");
+    expect(prompt).toContain("    Card detail: Peaceful");
+    expect(prompt).toContain("This is also what they would rather.");
+    expect(prompt.indexOf("What they would rather")).toBeLessThan(prompt.indexOf("</player_input>"));
   });
 
   it("notes a missing eulogy", () => {
@@ -82,12 +110,20 @@ describe("generateLifeStory", () => {
     const body = JSON.parse(String(init?.body));
     expect(body.model).toBe(DEFAULT_STORY_MODEL);
     expect(body.max_tokens).toBe(STORY_MAX_TOKENS);
+    expect(body.thinking).toEqual({ type: "between_tools" });
+  });
+
+  it("only turns thinking off for Sonnet 5.5", () => {
+    expect(thinkingFor("claude-sonnet-5-5")).toEqual({ type: "between_tools" });
+    expect(thinkingFor("claude-opus-5-5")).toBeUndefined();
   });
 
   it("uses a model override", async () => {
     const fetchImpl = jest.fn<FetchFn>().mockResolvedValue(okJson({ content: [{ type: "text", text: "Hi" }] }));
     await generateLifeStory(input, { apiKey: "k", model: "other-model", fetchImpl });
-    expect(JSON.parse(String(fetchImpl.mock.calls[0][1]?.body)).model).toBe("other-model");
+    const body = JSON.parse(String(fetchImpl.mock.calls[0][1]?.body));
+    expect(body.model).toBe("other-model");
+    expect(body).not.toHaveProperty("thinking");
   });
 
   it("throws StoryUpstreamError with the status on a non-200", async () => {
@@ -96,8 +132,10 @@ describe("generateLifeStory", () => {
   });
 
   it("throws when the reply has no text", async () => {
-    const fetchImpl = jest.fn<FetchFn>().mockResolvedValue(okJson({ content: [] }));
-    await expect(generateLifeStory(input, { apiKey: "k", fetchImpl })).rejects.toThrow(StoryUpstreamError);
+    const fetchImpl = jest.fn<FetchFn>().mockResolvedValue(
+      okJson({ content: [{ type: "thinking", thinking: "" }], stop_reason: "max_tokens" }),
+    );
+    await expect(generateLifeStory(input, { apiKey: "k", fetchImpl })).rejects.toThrow(/stop_reason: max_tokens/);
   });
 
   it("times out", async () => {

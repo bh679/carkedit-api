@@ -1,7 +1,8 @@
 // CarkedIt API — Single-player life story.
 //
 // At the end of a solo game the player has picked a life, a death and an
-// afterlife card and written their own eulogy. This turns those into a short
+// afterlife card and written their own eulogy. For each deck they first chose
+// what they would rather (`rather`), then what is more likely (the pick). This turns those into a short
 // story with Claude. The endpoint is public (solo needs no account), so input
 // is tightly capped and the output length is bounded.
 
@@ -16,7 +17,17 @@ export const LIMITS = Object.freeze({
 });
 
 export const DEFAULT_STORY_MODEL = "claude-sonnet-5-5";
-export const STORY_MAX_TOKENS = 350;
+// Headroom over the ~350-token story; clampStory() bounds the length.
+export const STORY_MAX_TOKENS = 600;
+/**
+ * Sonnet 5.5 thinks by default and the thinking counts toward max_tokens, so
+ * it could use the whole budget and return no text. `between_tools` turns
+ * thinking off there; other models (via STORY_MODEL) keep their defaults,
+ * since some reject this setting.
+ */
+export function thinkingFor(model: string): { type: "between_tools" } | undefined {
+  return model.startsWith("claude-sonnet-5-5") ? { type: "between_tools" } : undefined;
+}
 /** The story is capped at whichever of these is shorter. */
 export const STORY_MAX_PARAGRAPHS = 2;
 export const STORY_MAX_SENTENCES = 6;
@@ -24,10 +35,15 @@ export const STORY_TIMEOUT_MS = 20_000;
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 
-export interface StoryPick {
+export interface StoryCard {
   readonly title: string;
   readonly description: string;
   readonly answer: string;
+}
+
+/** The more-likely card, plus the would-rather card when the client sent one. */
+export interface StoryPick extends StoryCard {
+  readonly rather?: StoryCard;
 }
 
 export interface StoryInput {
@@ -54,14 +70,22 @@ function readText(value: unknown, field: string, max: number, required = false):
   return trimmed;
 }
 
-function readPick(raw: unknown, deck: StoryDeck): StoryPick {
-  if (!raw || typeof raw !== "object") throw new StoryValidationError(`picks.${deck} is required`);
-  const pick = raw as Record<string, unknown>;
+function readCard(raw: unknown, field: string): StoryCard {
+  if (!raw || typeof raw !== "object") throw new StoryValidationError(`${field} is required`);
+  const card = raw as Record<string, unknown>;
   return Object.freeze({
-    title: readText(pick.title, `picks.${deck}.title`, LIMITS.title, true),
-    description: readText(pick.description, `picks.${deck}.description`, LIMITS.description),
-    answer: readText(pick.answer, `picks.${deck}.answer`, LIMITS.answer),
+    title: readText(card.title, `${field}.title`, LIMITS.title, true),
+    description: readText(card.description, `${field}.description`, LIMITS.description),
+    answer: readText(card.answer, `${field}.answer`, LIMITS.answer),
   });
+}
+
+function readPick(raw: unknown, deck: StoryDeck): StoryPick {
+  const field = `picks.${deck}`;
+  const card = readCard(raw, field);
+  const rather = (raw as Record<string, unknown>).rather;
+  if (rather === undefined || rather === null) return card;
+  return Object.freeze({ ...card, rather: readCard(rather, `${field}.rather`) });
 }
 
 /** Validate and normalise a request body. Throws StoryValidationError. Pure. */
@@ -82,6 +106,7 @@ export function validateStoryInput(body: unknown): StoryInput {
 export const STORY_SYSTEM_PROMPT = [
   "You write short life stories for CarkedIt, an Australian party card game about death that is darkly funny but warm.",
   "The player chose three cards: how they lived, how they died and what happened after. They may also have written their own eulogy.",
+  "For each, they may first have said what they would rather; the chosen card is what was more likely, and it is what actually happened. When the two differ, have fun with the gap between hope and reality.",
   `Write the story of their life in the second person ("You..."), at most ${STORY_MAX_PARAGRAPHS} short paragraphs and at most ${STORY_MAX_SENTENCES} sentences in total, moving from life to death to afterlife.`,
   "Weave in every card and any answers, and echo the spirit of their eulogy if they wrote one.",
   "Keep it playful, cheeky and kind. Nothing cruel, sexual or graphic.",
@@ -95,11 +120,22 @@ const DECK_LABELS: Record<StoryDeck, string> = {
   bye: "What happened after",
 };
 
+function describeCard(card: StoryCard, indent: string): string[] {
+  const parts: string[] = [];
+  if (card.description) parts.push(`${indent}Card detail: ${card.description}`);
+  if (card.answer) parts.push(`${indent}Their answer: ${card.answer}`);
+  return parts;
+}
+
+function describeRather(pick: StoryPick): string[] {
+  const { rather } = pick;
+  if (!rather) return [];
+  if (rather.title === pick.title) return ["  This is also what they would rather."];
+  return [`  What they would rather: ${rather.title}`, ...describeCard(rather, "    ")];
+}
+
 function describePick(deck: StoryDeck, pick: StoryPick): string {
-  const parts = [`${DECK_LABELS[deck]}: ${pick.title}`];
-  if (pick.description) parts.push(`  Card detail: ${pick.description}`);
-  if (pick.answer) parts.push(`  Their answer: ${pick.answer}`);
-  return parts.join("\n");
+  return [`${DECK_LABELS[deck]}: ${pick.title}`, ...describeCard(pick, "  "), ...describeRather(pick)].join("\n");
 }
 
 /** The user message for the model. Pure. */
@@ -158,6 +194,7 @@ export async function generateLifeStory(input: StoryInput, options: GenerateOpti
       body: JSON.stringify({
         model,
         max_tokens: STORY_MAX_TOKENS,
+        thinking: thinkingFor(model),
         system: STORY_SYSTEM_PROMPT,
         messages: [{ role: "user", content: buildStoryPrompt(input) }],
       }),
@@ -170,12 +207,17 @@ export async function generateLifeStory(input: StoryInput, options: GenerateOpti
     clearTimeout(timer);
   }
   if (!res.ok) throw new StoryUpstreamError("Story provider returned an error", res.status);
-  const data = (await res.json().catch(() => null)) as { content?: Array<{ type?: string; text?: string }> } | null;
+  const data = (await res.json().catch(() => null)) as {
+    content?: Array<{ type?: string; text?: string }>;
+    stop_reason?: string;
+  } | null;
   const text = (data?.content ?? [])
     .filter((block) => block?.type === "text" && typeof block.text === "string")
     .map((block) => block.text)
     .join("")
     .trim();
-  if (!text) throw new StoryUpstreamError("Story provider returned no text", res.status);
+  if (!text) {
+    throw new StoryUpstreamError(`Story provider returned no text (stop_reason: ${data?.stop_reason ?? "unknown"})`, res.status);
+  }
   return clampStory(text);
 }
