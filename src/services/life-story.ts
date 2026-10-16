@@ -16,7 +16,10 @@ export const LIMITS = Object.freeze({
 });
 
 export const DEFAULT_STORY_MODEL = "claude-sonnet-5-5";
-export const STORY_MAX_TOKENS = 600;
+export const STORY_MAX_TOKENS = 350;
+/** The story is capped at whichever of these is shorter. */
+export const STORY_MAX_PARAGRAPHS = 2;
+export const STORY_MAX_SENTENCES = 6;
 export const STORY_TIMEOUT_MS = 20_000;
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -79,7 +82,7 @@ export function validateStoryInput(body: unknown): StoryInput {
 export const STORY_SYSTEM_PROMPT = [
   "You write short life stories for CarkedIt, an Australian party card game about death that is darkly funny but warm.",
   "The player chose three cards: how they lived, how they died and what happened after. They may also have written their own eulogy.",
-  "Write the story of their life in the second person (\"You...\"), 150 to 250 words, moving from life to death to afterlife.",
+  `Write the story of their life in the second person ("You..."), at most ${STORY_MAX_PARAGRAPHS} short paragraphs and at most ${STORY_MAX_SENTENCES} sentences in total, moving from life to death to afterlife.`,
   "Weave in every card and any answers, and echo the spirit of their eulogy if they wrote one.",
   "Keep it playful, cheeky and kind. Nothing cruel, sexual or graphic.",
   "Plain prose only: no title, no headings, no lists, no markdown. Separate paragraphs with a blank line.",
@@ -104,6 +107,31 @@ export function buildStoryPrompt(input: StoryInput): string {
   const picks = STORY_DECKS.map((deck) => describePick(deck, input.picks[deck])).join("\n");
   const eulogy = input.eulogy ? `Their eulogy:\n${input.eulogy}` : "They did not write a eulogy.";
   return `<player_input>\n${picks}\n\n${eulogy}\n</player_input>\n\nWrite their life story.`;
+}
+
+// A sentence: text up to . ! ? or …, plus any closing quotes/brackets, then whitespace or the end.
+const SENTENCE_RE = /[^.!?…]*(?:[.!?…]+["'”’)\]]*|$)(?:\s+|$)/g;
+
+function splitSentences(paragraph: string): string[] {
+  return (paragraph.match(SENTENCE_RE) ?? []).map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * Cap a story at STORY_MAX_PARAGRAPHS paragraphs and STORY_MAX_SENTENCES
+ * sentences, whichever is shorter. Backstop for the prompt. Pure.
+ */
+export function clampStory(text: string): string {
+  const paragraphs = text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean)
+    .slice(0, STORY_MAX_PARAGRAPHS);
+  let remaining = STORY_MAX_SENTENCES;
+  const kept: string[] = [];
+  for (const paragraph of paragraphs) {
+    if (remaining <= 0) break;
+    const sentences = splitSentences(paragraph).slice(0, remaining);
+    remaining -= sentences.length;
+    if (sentences.length) kept.push(sentences.join(" "));
+  }
+  return kept.join("\n\n");
 }
 
 interface GenerateOptions {
@@ -149,5 +177,5 @@ export async function generateLifeStory(input: StoryInput, options: GenerateOpti
     .join("")
     .trim();
   if (!text) throw new StoryUpstreamError("Story provider returned no text", res.status);
-  return text;
+  return clampStory(text);
 }
