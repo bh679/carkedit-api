@@ -7,6 +7,7 @@ import {
   StoryUpstreamError,
   DEFAULT_STORY_MODEL,
   STORY_MAX_TOKENS,
+  thinkingFor,
   STORY_SYSTEM_PROMPT,
   LIMITS,
   clampStory,
@@ -109,12 +110,20 @@ describe("generateLifeStory", () => {
     const body = JSON.parse(String(init?.body));
     expect(body.model).toBe(DEFAULT_STORY_MODEL);
     expect(body.max_tokens).toBe(STORY_MAX_TOKENS);
+    expect(body.thinking).toEqual({ type: "between_tools" });
+  });
+
+  it("only turns thinking off for Sonnet 5.5", () => {
+    expect(thinkingFor("claude-sonnet-5-5")).toEqual({ type: "between_tools" });
+    expect(thinkingFor("claude-opus-5-5")).toBeUndefined();
   });
 
   it("uses a model override", async () => {
     const fetchImpl = jest.fn<FetchFn>().mockResolvedValue(okJson({ content: [{ type: "text", text: "Hi" }] }));
     await generateLifeStory(input, { apiKey: "k", model: "other-model", fetchImpl });
-    expect(JSON.parse(String(fetchImpl.mock.calls[0][1]?.body)).model).toBe("other-model");
+    const body = JSON.parse(String(fetchImpl.mock.calls[0][1]?.body));
+    expect(body.model).toBe("other-model");
+    expect(body).not.toHaveProperty("thinking");
   });
 
   it("throws StoryUpstreamError with the status on a non-200", async () => {
@@ -123,8 +132,10 @@ describe("generateLifeStory", () => {
   });
 
   it("throws when the reply has no text", async () => {
-    const fetchImpl = jest.fn<FetchFn>().mockResolvedValue(okJson({ content: [] }));
-    await expect(generateLifeStory(input, { apiKey: "k", fetchImpl })).rejects.toThrow(StoryUpstreamError);
+    const fetchImpl = jest.fn<FetchFn>().mockResolvedValue(
+      okJson({ content: [{ type: "thinking", thinking: "" }], stop_reason: "max_tokens" }),
+    );
+    await expect(generateLifeStory(input, { apiKey: "k", fetchImpl })).rejects.toThrow(/stop_reason: max_tokens/);
   });
 
   it("times out", async () => {

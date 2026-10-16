@@ -17,7 +17,17 @@ export const LIMITS = Object.freeze({
 });
 
 export const DEFAULT_STORY_MODEL = "claude-sonnet-5-5";
-export const STORY_MAX_TOKENS = 350;
+// Headroom over the ~350-token story; clampStory() bounds the length.
+export const STORY_MAX_TOKENS = 600;
+/**
+ * Sonnet 5.5 thinks by default and the thinking counts toward max_tokens, so
+ * it could use the whole budget and return no text. `between_tools` turns
+ * thinking off there; other models (via STORY_MODEL) keep their defaults,
+ * since some reject this setting.
+ */
+export function thinkingFor(model: string): { type: "between_tools" } | undefined {
+  return model.startsWith("claude-sonnet-5-5") ? { type: "between_tools" } : undefined;
+}
 /** The story is capped at whichever of these is shorter. */
 export const STORY_MAX_PARAGRAPHS = 2;
 export const STORY_MAX_SENTENCES = 6;
@@ -184,6 +194,7 @@ export async function generateLifeStory(input: StoryInput, options: GenerateOpti
       body: JSON.stringify({
         model,
         max_tokens: STORY_MAX_TOKENS,
+        thinking: thinkingFor(model),
         system: STORY_SYSTEM_PROMPT,
         messages: [{ role: "user", content: buildStoryPrompt(input) }],
       }),
@@ -196,12 +207,17 @@ export async function generateLifeStory(input: StoryInput, options: GenerateOpti
     clearTimeout(timer);
   }
   if (!res.ok) throw new StoryUpstreamError("Story provider returned an error", res.status);
-  const data = (await res.json().catch(() => null)) as { content?: Array<{ type?: string; text?: string }> } | null;
+  const data = (await res.json().catch(() => null)) as {
+    content?: Array<{ type?: string; text?: string }>;
+    stop_reason?: string;
+  } | null;
   const text = (data?.content ?? [])
     .filter((block) => block?.type === "text" && typeof block.text === "string")
     .map((block) => block.text)
     .join("")
     .trim();
-  if (!text) throw new StoryUpstreamError("Story provider returned no text", res.status);
+  if (!text) {
+    throw new StoryUpstreamError(`Story provider returned no text (stop_reason: ${data?.stop_reason ?? "unknown"})`, res.status);
+  }
   return clampStory(text);
 }
