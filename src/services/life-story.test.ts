@@ -32,6 +32,15 @@ describe("validateStoryInput", () => {
     expect(input.picks.bye).toEqual({ title: "Became a ghost", description: "Haunts the pokies", answer: "" });
   });
 
+  it("keeps a valid would-rather card and omits it when absent", () => {
+    const input = validateStoryInput({
+      ...validBody,
+      picks: { ...validBody.picks, die: { ...validBody.picks.die, rather: { title: " In my sleep ", answer: "Snoring" } } },
+    });
+    expect(input.picks.die.rather).toEqual({ title: "In my sleep", description: "", answer: "Snoring" });
+    expect(input.picks.live).not.toHaveProperty("rather");
+  });
+
   it("allows an empty eulogy", () => {
     expect(validateStoryInput({ ...validBody, eulogy: undefined }).eulogy).toBe("");
   });
@@ -44,6 +53,9 @@ describe("validateStoryInput", () => {
     [{ picks: { ...validBody.picks, die: { title: 42 } } }],
     [{ ...validBody, eulogy: "x".repeat(LIMITS.eulogy + 1) }],
     [{ picks: { ...validBody.picks, bye: { title: "x".repeat(LIMITS.title + 1) } } }],
+    [{ picks: { ...validBody.picks, die: { ...validBody.picks.die, rather: "nope" } } }],
+    [{ picks: { ...validBody.picks, die: { ...validBody.picks.die, rather: { title: "" } } } }],
+    [{ picks: { ...validBody.picks, live: { ...validBody.picks.live, rather: { title: "x".repeat(LIMITS.title + 1) } } } }],
   ])("rejects %j", (body) => {
     expect(() => validateStoryInput(body)).toThrow(StoryValidationError);
   });
@@ -58,6 +70,21 @@ describe("buildStoryPrompt", () => {
     expect(prompt).toContain("Card detail: Haunts the pokies");
     expect(prompt).toContain("Gone too soon.");
     expect(prompt.indexOf("</player_input>")).toBeGreaterThan(prompt.indexOf("Gone too soon."));
+  });
+
+  it("describes the would-rather card when it differs, and notes when it matches", () => {
+    const prompt = buildStoryPrompt(validateStoryInput({
+      ...validBody,
+      picks: {
+        ...validBody.picks,
+        die: { ...validBody.picks.die, rather: { title: "In my sleep", description: "Peaceful" } },
+        live: { ...validBody.picks.live, rather: { title: "Ran a pub" } },
+      },
+    }));
+    expect(prompt).toContain("What they would rather: In my sleep");
+    expect(prompt).toContain("    Card detail: Peaceful");
+    expect(prompt).toContain("This is also what they would rather.");
+    expect(prompt.indexOf("What they would rather")).toBeLessThan(prompt.indexOf("</player_input>"));
   });
 
   it("notes a missing eulogy", () => {
