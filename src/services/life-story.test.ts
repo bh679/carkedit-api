@@ -7,7 +7,9 @@ import {
   StoryUpstreamError,
   DEFAULT_STORY_MODEL,
   STORY_MAX_TOKENS,
+  STORY_SYSTEM_PROMPT,
   LIMITS,
+  clampStory,
 } from "./life-story.js";
 
 type FetchFn = typeof fetch;
@@ -103,5 +105,54 @@ describe("generateLifeStory", () => {
       init?.signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
     }));
     await expect(generateLifeStory(input, { apiKey: "k", fetchImpl, timeoutMs: 10 })).rejects.toThrow("timed out");
+  });
+});
+
+describe("clampStory", () => {
+  const sentences = (n: number, from = 1) =>
+    Array.from({ length: n }, (_, i) => `Sentence ${from + i}.`).join(" ");
+
+  it("keeps at most 2 paragraphs", () => {
+    expect(clampStory("One.\n\nTwo.\n\nThree.")).toBe("One.\n\nTwo.");
+  });
+
+  it("keeps at most 6 sentences in one paragraph", () => {
+    expect(clampStory(sentences(9))).toBe(sentences(6));
+  });
+
+  it("counts sentences across paragraphs and keeps the break", () => {
+    expect(clampStory(`${sentences(4)}\n\n${sentences(4, 5)}`))
+      .toBe(`${sentences(4)}\n\nSentence 5. Sentence 6.`);
+  });
+
+  it("drops a second paragraph when the first already uses 6 sentences", () => {
+    expect(clampStory(`${sentences(6)}\n\nExtra.`)).toBe(sentences(6));
+  });
+
+  it("leaves short stories unchanged", () => {
+    expect(clampStory("You lived. Then you didn't.\n\nThe end!")).toBe("You lived. Then you didn't.\n\nThe end!");
+  });
+
+  it("handles ! ? … and closing quotes", () => {
+    const text = 'Wow! Really? Well… "Fine." (Okay.) Six. Seven.';
+    expect(clampStory(text)).toBe('Wow! Really? Well… "Fine." (Okay.) Six.');
+  });
+
+  it("keeps trailing text with no final punctuation", () => {
+    expect(clampStory("You lived. You died")).toBe("You lived. You died");
+  });
+});
+
+describe("story length limits", () => {
+  it("tells the model the paragraph and sentence caps", () => {
+    expect(STORY_SYSTEM_PROMPT).toContain("at most 2 short paragraphs");
+    expect(STORY_SYSTEM_PROMPT).toContain("at most 6 sentences");
+  });
+
+  it("generateLifeStory returns the clamped story", async () => {
+    const long = "A. B. C.\n\nD. E. F. G.\n\nH.";
+    const fetchImpl = jest.fn<FetchFn>().mockResolvedValue(okJson({ content: [{ type: "text", text: long }] }));
+    const story = await generateLifeStory(validateStoryInput(validBody), { apiKey: "k", fetchImpl });
+    expect(story).toBe("A. B. C.\n\nD. E. F.");
   });
 });
