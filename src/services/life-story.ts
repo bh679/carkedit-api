@@ -13,6 +13,7 @@ export const LIMITS = Object.freeze({
   title: 120,
   description: 300,
   answer: 140,
+  option: 120,
   eulogy: 1000,
 });
 
@@ -35,10 +36,17 @@ export const STORY_TIMEOUT_MS = 20_000;
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 
+/** Which option the player took on a split ("Would You Rather") card. */
+export interface StoryChoice {
+  readonly chosen: string;
+  readonly other: string;
+}
+
 export interface StoryCard {
   readonly title: string;
   readonly description: string;
   readonly answer: string;
+  readonly choice?: StoryChoice;
 }
 
 /** The more-likely card, plus the would-rather card when the client sent one. */
@@ -70,14 +78,25 @@ function readText(value: unknown, field: string, max: number, required = false):
   return trimmed;
 }
 
+function readChoice(raw: unknown, field: string): StoryChoice {
+  if (!raw || typeof raw !== "object") throw new StoryValidationError(`${field} must be an object`);
+  const choice = raw as Record<string, unknown>;
+  return Object.freeze({
+    chosen: readText(choice.chosen, `${field}.chosen`, LIMITS.option, true),
+    other: readText(choice.other, `${field}.other`, LIMITS.option, true),
+  });
+}
+
 function readCard(raw: unknown, field: string): StoryCard {
   if (!raw || typeof raw !== "object") throw new StoryValidationError(`${field} is required`);
   const card = raw as Record<string, unknown>;
-  return Object.freeze({
+  const base = {
     title: readText(card.title, `${field}.title`, LIMITS.title, true),
     description: readText(card.description, `${field}.description`, LIMITS.description),
     answer: readText(card.answer, `${field}.answer`, LIMITS.answer),
-  });
+  };
+  if (card.choice === undefined || card.choice === null) return Object.freeze(base);
+  return Object.freeze({ ...base, choice: readChoice(card.choice, `${field}.choice`) });
 }
 
 function readPick(raw: unknown, deck: StoryDeck): StoryPick {
@@ -108,6 +127,7 @@ export const STORY_SYSTEM_PROMPT = [
   "The player chose three cards: how they lived, how they died and what happened after. They may also have written their own eulogy.",
   "For each, they may first have said what they would rather; the chosen card is what was more likely, and it is what actually happened. When the two differ, have fun with the gap between hope and reality.",
   `Write the story of their life in the second person ("You..."), at most ${STORY_MAX_PARAGRAPHS} short paragraphs and at most ${STORY_MAX_SENTENCES} sentences in total, moving from life to death to afterlife.`,
+  "Some cards are \"would you rather\" dilemmas with two options; for those, the option they chose is what counts.",
   "Weave in every card and any answers, and echo the spirit of their eulogy if they wrote one.",
   "Keep it playful, cheeky and kind. Nothing cruel, sexual or graphic.",
   "Plain prose only: no title, no headings, no lists, no markdown. Separate paragraphs with a blank line.",
@@ -124,6 +144,7 @@ function describeCard(card: StoryCard, indent: string): string[] {
   const parts: string[] = [];
   if (card.description) parts.push(`${indent}Card detail: ${card.description}`);
   if (card.answer) parts.push(`${indent}Their answer: ${card.answer}`);
+  if (card.choice) parts.push(`${indent}They chose: ${card.choice.chosen} (over ${card.choice.other})`);
   return parts;
 }
 
