@@ -44,6 +44,20 @@ describe("validateStoryInput", () => {
     expect(input.picks.live).not.toHaveProperty("rather");
   });
 
+  it("keeps a split-card choice on a pick or its would-rather card, and omits it when absent", () => {
+    const choice = { chosen: " Fire ", other: "Ice" };
+    const input = validateStoryInput({
+      ...validBody,
+      picks: {
+        ...validBody.picks,
+        die: { ...validBody.picks.die, choice, rather: { title: "Fire or ice", choice } },
+      },
+    });
+    expect(input.picks.die.choice).toEqual({ chosen: "Fire", other: "Ice" });
+    expect(input.picks.die.rather?.choice).toEqual({ chosen: "Fire", other: "Ice" });
+    expect(input.picks.live).not.toHaveProperty("choice");
+  });
+
   it("allows an empty eulogy", () => {
     expect(validateStoryInput({ ...validBody, eulogy: undefined }).eulogy).toBe("");
   });
@@ -59,6 +73,9 @@ describe("validateStoryInput", () => {
     [{ picks: { ...validBody.picks, die: { ...validBody.picks.die, rather: "nope" } } }],
     [{ picks: { ...validBody.picks, die: { ...validBody.picks.die, rather: { title: "" } } } }],
     [{ picks: { ...validBody.picks, live: { ...validBody.picks.live, rather: { title: "x".repeat(LIMITS.title + 1) } } } }],
+    [{ picks: { ...validBody.picks, die: { ...validBody.picks.die, choice: "Fire" } } }],
+    [{ picks: { ...validBody.picks, die: { ...validBody.picks.die, choice: { chosen: "Fire" } } } }],
+    [{ picks: { ...validBody.picks, die: { ...validBody.picks.die, choice: { chosen: "x".repeat(LIMITS.option + 1), other: "Ice" } } } }],
   ])("rejects %j", (body) => {
     expect(() => validateStoryInput(body)).toThrow(StoryValidationError);
   });
@@ -88,6 +105,16 @@ describe("buildStoryPrompt", () => {
     expect(prompt).toContain("    Card detail: Peaceful");
     expect(prompt).toContain("This is also what they would rather.");
     expect(prompt.indexOf("What they would rather")).toBeLessThan(prompt.indexOf("</player_input>"));
+  });
+
+  it("describes the option chosen on a split card and the one it beat", () => {
+    const prompt = buildStoryPrompt(validateStoryInput({
+      ...validBody,
+      picks: { ...validBody.picks, die: { ...validBody.picks.die, choice: { chosen: "Fire", other: "Ice" } } },
+    }));
+    expect(prompt).toContain("  They chose: Fire (over Ice)");
+    expect(prompt.indexOf("They chose")).toBeLessThan(prompt.indexOf("</player_input>"));
+    expect(STORY_SYSTEM_PROMPT).toContain("would you rather");
   });
 
   it("notes a missing eulogy", () => {
