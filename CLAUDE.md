@@ -193,10 +193,11 @@ Format: `V.MM.PPPP`
 Update `package.json` version field on every commit.
 
 > ⛔ **Never create or `git push` `v<version>` / `vs<version>` git tags from a clone.**
-> In carkedit these tags are **deploy triggers** — `deploy-production.yml` fires on `v[0-9]*` and
-> `deploy-staging.yml` on `vs*`, so pushing one ships *immediately*. They are **not** version markers:
-> the `package.json` bump above is the version record. Staging/production deploys happen **only** via the
-> Promote Build buttons on the deploy dashboard (dev→staging, staging→prod), which create tags through the
+> In carkedit these tags are **deploy triggers** — `deploy-production.yml` fires on `v[0-9]*`, so pushing
+> one ships *immediately*. (`vs*` tags belonged to the staging tier, retired Nov 2026; they are still
+> blocked.) They are **not** version markers: the `package.json` bump above is the version record.
+> Production deploys happen **only** via the "Tag for production" button on the dev deploy dashboard
+> (dev→prod), which creates tags through the
 > GitHub API. This **overrides** the global versioning standard's "tag every minor/major bump with `v` and
 > push immediately" — that rule does **not** apply to carkedit. A `pre-push` hook (`.githooks/pre-push`)
 > enforces this; override only with `git push --no-verify` if you truly intend to deploy.
