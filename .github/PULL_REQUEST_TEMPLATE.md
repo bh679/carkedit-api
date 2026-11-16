@@ -10,19 +10,19 @@
 ## QA / Test Notes
 
 <!--
-  Paste the Gate 2 testing report here. This section is read VERBATIM by the
-  deploy admin "Staging releases (QA)" panel, so:
+  Paste the Gate 2 testing report here. QA tooling may read this section
+  VERBATIM, so:
     • keep the heading line exactly as "## QA / Test Notes"
     • put everything QA needs BELOW it (this comment is stripped automatically)
   Include:
     - What changed (user-visible behaviour)
-    - How to test it on staging
+    - How to test it on the dev server (dev.play.carkedit.com)
     - Screenshots / screen-recording links
   Leave this section non-empty before requesting Gate 3.
 -->
 
 - What changed:
-- How to test on staging:
+- How to test on dev:
 - Screenshots / links:
 
 ## Release Note

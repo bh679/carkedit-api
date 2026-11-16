@@ -5,7 +5,7 @@
 #
 # In carkedit, version tags ARE deploys — pushing one ships immediately:
 #   refs/tags/v<digit>...  -> deploy-production.yml -> play.carkedit.com
-#   refs/tags/vs...        -> deploy-staging.yml    -> staging.play.carkedit.com
+#   refs/tags/vs...        -> legacy staging tags (staging retired Nov 2026) — still refused
 #
 # Release tags are created ONLY by the Promote Build buttons on the deploy
 # dashboard, which tag through the GitHub API (POST /git/refs) — never by
@@ -25,8 +25,8 @@ done
 
 if [ "$blocked" -ne 0 ]; then
 	echo "" >&2
-	echo "pre-push blocked: pushing v*/vs* tags deploys carkedit to staging/production." >&2
-	echo "Promote builds via the deploy dashboard buttons (dev->staging, staging->prod)," >&2
+	echo "pre-push blocked: pushing v* tags deploys carkedit to production (vs* is refused too)." >&2
+	echo "Promote builds via the deploy dashboard's Tag for production button (dev->prod)," >&2
 	echo "which create tags through the GitHub API. To override deliberately:" >&2
 	echo "  git push --no-verify" >&2
 	exit 1

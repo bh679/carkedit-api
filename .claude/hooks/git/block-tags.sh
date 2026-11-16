@@ -7,7 +7,7 @@ HOOK_VERSION="1.0.0"
 # (and from cutting GitHub releases) before the Bash tool executes.
 #
 # Why: CarkedIt releases are shipped from the deployment page, NOT from Claude.
-# The repos auto-deploy prod/staging the moment a `v<version>` tag is pushed, so a
+# The repos auto-deploy production the moment a `v<version>` tag is pushed, so a
 # stray `git tag vX && git push origin vX` would silently deploy with no gate.
 #
 # Blocks (hard deny — never fails open):
@@ -62,7 +62,7 @@ BNDRY='(^|[;&|({])[[:space:]]*'
 # An actual `git push` (incl. `cd … && git push`) whose args carry a tag:
 # --tags / --follow-tags / an explicit refs/tags/ refspec / a v* or vs* ref.
 if printf '%s' "$CMD" | grep -Eq "${BNDRY}git[[:space:]]+push[[:space:]][^;&|]*(--tags|--follow-tags|refs/tags/|[[:space:]/]vs?[0-9]+(\.[0-9]+)*([[:space:]]|\$))"; then
-  deny "pushing a git tag triggers a production/staging deploy (v* = prod, vs* = staging)."
+  deny "pushing a git tag triggers a production deploy (v* = prod; legacy vs* tags are blocked too)."
 fi
 
 # ── 2. Creating / deleting / moving a tag ───────────────────────────────────
