@@ -51,7 +51,7 @@ const clientDir = process.env.CLIENT_DIR || path.join(__dirname, "../../carkedit
 
 // Initialize Firebase Admin SDK. The project_id from the service-account
 // JSON drives the same-origin OAuth proxy below, so swapping the JSON file
-// per environment (dev/staging/prod) automatically points the proxy at the
+// per environment (dev/prod) automatically points the proxy at the
 // matching Firebase project.
 const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH || path.join(__dirname, "../firebase-service-account.json");
 let firebaseProjectId = "carkedit-5cc8e";
@@ -150,16 +150,16 @@ const server = defineServer({
             "'self'", "wss:", "ws:",
             "https://*.googleapis.com", "https://*.firebaseapp.com",
             "https://www.gstatic.com", "https://raw.githubusercontent.com", "https://unpkg.com",
-            "https://play.carkedit.com", "https://staging.play.carkedit.com", "https://dev.play.carkedit.com",
+            "https://play.carkedit.com", "https://dev.play.carkedit.com",
           ],
           // Sibling carkedit hosts in frame-src so the stats-page "preview
           // production data" toggle can sign in via the secondary Firebase
           // app — Firebase loads a hidden /__/auth/iframe on the prod host
-          // from a staging/dev page, which would otherwise be blocked here.
+          // from a dev page, which would otherwise be blocked here.
           // Mirrors what connectSrc already does for cross-origin fetches.
           frameSrc: [
             "'self'", "https://*.firebaseapp.com", "https://accounts.google.com",
-            "https://play.carkedit.com", "https://staging.play.carkedit.com", "https://dev.play.carkedit.com",
+            "https://play.carkedit.com", "https://dev.play.carkedit.com",
           ],
         },
       },
@@ -176,7 +176,7 @@ const server = defineServer({
     // server level (`server.prependListener('request', ...)` in
     // @colyseus/core/build/router/index — it reflects any Origin and responds
     // to OPTIONS preflight before our Express stack runs). That's why the
-    // dev/staging stats page can fetch this API cross-origin without adding
+    // dev stats page can fetch this API cross-origin without adding
     // any middleware here. The real security gate is requireAdmin() on each
     // route — auth uses Bearer tokens (no cookies), so Allow-Credentials does
     // not grant anything without a valid Firebase ID token from this project.
@@ -191,7 +191,7 @@ const server = defineServer({
 
     // The pricing page was renamed evangelist-pricing → champion-pricing with the
     // "Champion" relabel. Registered before express.static so old links/bookmarks
-    // keep working. Staging (Apache) mirrors this in carkedit-online/.htaccess.
+    // keep working. Apache-served hosts mirror this in carkedit-online/.htaccess.
     app.get("/evangelist-pricing", (_req: any, res: any) => res.redirect(301, "/champion-pricing"));
 
     app.use(express.static(clientDir, { extensions: ['html'] }));
@@ -1510,10 +1510,10 @@ const server = defineServer({
       }
     });
 
-    // ── Cost Reporting: server-to-server (dev/staging → play) ──────
-    // Key-gated (NOT Firebase): the dev/staging boxes POST here after each
+    // ── Cost Reporting: server-to-server (dev → play) ──────
+    // Key-gated (NOT Firebase): the dev box POSTs here after each
     // generation so the central (play) dashboard can show per-env image-gen costs.
-    const COST_ENV_ALLOWLIST = ['dev', 'staging', 'prod'];
+    const COST_ENV_ALLOWLIST = ['dev', 'prod'];
     app.post("/api/carkedit/costs/report", publicWriteLimiter, publicBodyLimit, (req: any, res: any) => {
       try {
         const key = req.headers["x-cost-report-key"];
@@ -2174,7 +2174,7 @@ const server = defineServer({
           logId = logRow.id;
 
           // Fire-and-forget: report this cost to the central (play) server.
-          // Only dev/staging report (they set COST_REPORT_URL); play never reports to itself.
+          // Only dev reports (it sets COST_REPORT_URL); play never reports to itself.
           if (process.env.DEPLOY_ENV && process.env.DEPLOY_ENV !== 'prod' && process.env.COST_REPORT_URL) {
             fetch(process.env.COST_REPORT_URL, {
               method: 'POST',
@@ -2330,7 +2330,7 @@ const server = defineServer({
           logId = logRow.id;
 
           // Fire-and-forget: report this cost to the central (play) server.
-          // Only dev/staging report (they set COST_REPORT_URL); play never reports to itself.
+          // Only dev reports (it sets COST_REPORT_URL); play never reports to itself.
           if (process.env.DEPLOY_ENV && process.env.DEPLOY_ENV !== 'prod' && process.env.COST_REPORT_URL) {
             fetch(process.env.COST_REPORT_URL, {
               method: 'POST',

@@ -27,7 +27,7 @@ async function verifyWithFirebase(token: string): Promise<DecodedHostToken> {
 
 /**
  * Dev/test bypass for local environments and automated tests, which cannot
- * sign in to Firebase. Never set ALLOW_GUEST_HOSTING on prod or staging.
+ * sign in to Firebase. Never set ALLOW_GUEST_HOSTING on prod.
  */
 export function isGuestHostingAllowed(): boolean {
   return process.env.ALLOW_GUEST_HOSTING === '1';

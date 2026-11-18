@@ -278,7 +278,7 @@ export function initDatabase(dbPath: string = DB_PATH): void {
     CREATE INDEX IF NOT EXISTS idx_gen_log_creator ON generation_log(creator_id);
 
     -- Unified cost storage for all sources: remote environment reports
-    -- (dev/staging → play), AWS/Cloudflare API data, manual entries, etc.
+    -- (dev → play), AWS/Cloudflare API data, manual entries, etc.
     CREATE TABLE IF NOT EXISTS cost_entries (
       id TEXT PRIMARY KEY,
       service TEXT NOT NULL,

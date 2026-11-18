@@ -1,14 +1,14 @@
 #!/usr/bin/env npx tsx
 // Backfill historical generation_log costs to the central (prod) cost_entries.
 //
-// Manually triggered — run on each dev/staging box after deploying the
+// Manually triggered — run on the dev box after deploying the
 // cost-reporting feature. Safe to run multiple times (idempotent via the
 // source_ref dedup on the play server).
 //
 // Usage:
 //   COST_REPORT_URL=https://play.carkedit.com/api/carkedit/costs/report \
 //   COST_REPORT_KEY=<secret> \
-//   DEPLOY_ENV=staging \
+//   DEPLOY_ENV=dev \
 //   npx tsx scripts/backfill-costs.ts
 
 import Database from "better-sqlite3";
