@@ -7,8 +7,8 @@
  * `fetchImpl` so tests can assert call shape without hitting the network.
  *
  * One env var drives the destination URL: `DISCORD_APP_WEBHOOK_URL`. Each
- * deployed box sets it to the appropriate channel webhook (dev + staging
- * share the "CarkedIt Online - DevAPP" hook; prod uses a separate prod
+ * deployed box sets it to the appropriate channel webhook (dev uses
+ * the "CarkedIt Online - DevAPP" hook; prod uses a separate prod
  * channel hook). If unset, calls log a debug line and return.
  */
 export interface DiscordEmbedField {

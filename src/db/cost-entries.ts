@@ -1,7 +1,7 @@
 // CarkedIt API — cost_entries DB helpers.
 //
 // Unified cost storage for all sources: remote environment reports
-// (dev/staging → play), AWS, Cloudflare, manual entries, etc.
+// (dev → play), AWS, Cloudflare, manual entries, etc.
 //
 // Idempotent inserts via UNIQUE source_ref — safe to POST the same
 // cost twice (backfill re-runs, network retries).

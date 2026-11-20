@@ -30,7 +30,7 @@ import type { ScheduledGame } from "../db/types.js";
 
 /**
  * Local-dev identity when ALLOW_GUEST_HOSTING=1 lets un-Firebased environments
- * host. Mirrors the bypass in verifyHostAuthorization; never set on staging/prod.
+ * host. Mirrors the bypass in verifyHostAuthorization; never set on prod.
  */
 const GUEST_HOST_USER_ID = "guest-host";
 

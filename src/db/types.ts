@@ -317,7 +317,7 @@ export interface GenerationLogEntry {
   created_at: string;
 }
 
-/** Unified cost entry — remote env reports (dev/staging → play), AWS/Cloudflare, manual, etc. */
+/** Unified cost entry — remote env reports (dev → play), AWS/Cloudflare, manual, etc. */
 export interface CostEntry {
   id: string;
   service: string;
